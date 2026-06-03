@@ -1,0 +1,16 @@
+{
+  "name": "@airun/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Observability / run-monitoring app (trigger.dev-style) over the runtime step journal.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo \"[dashboard] not implemented yet\"",
+    "dev": "echo \"[dashboard] not implemented yet\"",
+    "typecheck": "echo \"[dashboard] not implemented yet\""
+  },
+  "dependencies": {
+    "@airun/client": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@airun/builder",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Standalone visual builder app wrapping @airun/flow-builder.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo \"[builder] not implemented yet\"",
+    "dev": "echo \"[builder] not implemented yet\"",
+    "typecheck": "echo \"[builder] not implemented yet\""
+  },
+  "dependencies": {
+    "@airun/client": "workspace:*",
+    "@airun/flow-builder": "workspace:*"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@airun/docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Documentation site for AIRun.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "echo \"[docs] not implemented yet\"",
+    "dev": "echo \"[docs] not implemented yet\"",
+    "typecheck": "echo \"[docs] not implemented yet\""
+  }
+}

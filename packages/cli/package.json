@@ -1,0 +1,32 @@
+{
+  "name": "@airun/cli",
+  "version": "0.0.0",
+  "description": "airun CLI — compile *.graph.json to code in CI, run locally, deploy.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "airun": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@airun/compiler": "workspace:*",
+    "@airun/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@airun/tsconfig": "workspace:*",
+    "typescript": "^5.5.4"
+  }
+}

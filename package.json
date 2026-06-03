@@ -1,0 +1,25 @@
+{
+  "name": "airun",
+  "private": true,
+  "packageManager": "yarn@3.5.1",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tooling/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
