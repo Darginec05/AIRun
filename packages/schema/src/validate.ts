@@ -12,6 +12,8 @@ import { z } from "zod";
 import type {
   Binding,
   DataType,
+  JSONSchema,
+  JSONValue,
   PortDirection,
   PortKind,
   WorkflowGraph,
@@ -450,6 +452,15 @@ export type ValidationResult =
   | { ok: true; graph: WorkflowGraph }
   | { ok: false; issues: ValidationIssue[] };
 
+export interface ValidateOptions {
+  /**
+   * Resolves a referenced workflow so subworkflow inputs can be checked against
+   * the child's trigger input schema. Omit it and the subworkflow-inputs-match
+   * invariant is skipped (the call is only validated structurally).
+   */
+  resolveWorkflow?: (workflowId: string, version?: string) => WorkflowGraph | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Derived ports — computed from config, not authored in node.ports
 // ---------------------------------------------------------------------------
@@ -527,11 +538,98 @@ function dataTypesCompatible(a?: DataType, b?: DataType): boolean {
   return a === b;
 }
 
+type AddIssue = (invariant: string, message: string, path?: string) => void;
+
+function jsonTypeOf(value: JSONValue): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function schemaTypeMatches(schemaType: JSONValue | undefined, actual: string): boolean {
+  if (schemaType === undefined) return true;
+  const types = Array.isArray(schemaType) ? schemaType : [schemaType];
+  return types.some((t) => t === actual || (t === "integer" && actual === "number"));
+}
+
+function asObject(value: JSONValue | undefined): Record<string, JSONValue> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, JSONValue>)
+    : undefined;
+}
+
+/** Checks a subworkflow node's inputs against the resolved child's trigger input schema. */
+function checkSubworkflow(
+  node: Extract<WorkflowNode, { type: "subworkflow" }>,
+  opts: ValidateOptions,
+  add: AddIssue,
+): void {
+  const resolve = opts.resolveWorkflow;
+  if (!resolve) return; // no resolver → cross-graph check is skipped
+
+  const at = `subworkflow '${node.id}'`;
+  const child = resolve(node.config.workflowId, node.config.version);
+  if (!child) {
+    add("subworkflow-inputs-match", `${at}: cannot resolve workflow '${node.config.workflowId}'`);
+    return;
+  }
+
+  const trigger = child.nodes.find((n) => n.type === "trigger");
+  if (!trigger || trigger.type !== "trigger") {
+    add("subworkflow-inputs-match", `${at}: target '${child.id}' has no trigger`);
+    return;
+  }
+
+  const spec = trigger.config.trigger;
+  const inputSchemaId =
+    spec.kind === "event" || spec.kind === "webhook" ? spec.inputSchema : undefined;
+  const providedKeys = Object.keys(node.config.inputs);
+
+  if (!inputSchemaId) {
+    if (providedKeys.length > 0) {
+      add("subworkflow-inputs-match", `${at}: target '${child.id}' declares no input schema, but ${providedKeys.length} input(s) supplied`);
+    }
+    return;
+  }
+
+  const doc = asObject(child.schemas[inputSchemaId] as JSONValue | undefined);
+  if (!doc) {
+    add("subworkflow-inputs-match", `${at}: input schema '${inputSchemaId}' not found in target '${child.id}'`);
+    return;
+  }
+
+  const properties = asObject(doc.properties) ?? {};
+  const required = Array.isArray(doc.required)
+    ? doc.required.filter((r): r is string => typeof r === "string")
+    : [];
+  const allowsExtra = doc.additionalProperties === true;
+
+  for (const req of required) {
+    if (!(req in node.config.inputs)) {
+      add("subworkflow-inputs-match", `${at}: missing required input '${req}'`);
+    }
+  }
+  for (const key of providedKeys) {
+    if (!(key in properties)) {
+      if (!allowsExtra) add("subworkflow-inputs-match", `${at}: unknown input '${key}'`);
+      continue;
+    }
+    const b = node.config.inputs[key];
+    if (b && b.kind === "literal") {
+      const expected = asObject(properties[key])?.type;
+      const actual = jsonTypeOf(b.value);
+      if (!schemaTypeMatches(expected, actual)) {
+        add("subworkflow-inputs-match", `${at}: input '${key}' is ${actual}, expected ${JSON.stringify(expected)}`);
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Semantic validation
 // ---------------------------------------------------------------------------
 
-function semanticIssues(graph: WorkflowGraph): ValidationIssue[] {
+function semanticIssues(graph: WorkflowGraph, opts: ValidateOptions): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const add = (invariant: string, message: string, path?: string) =>
     issues.push({ invariant, message, path });
@@ -679,6 +777,9 @@ function semanticIssues(graph: WorkflowGraph): ValidationIssue[] {
           add("loop-bounds", `loop '${node.id}' (${node.config.mode}) needs a bound (maxIterations or count)`);
         }
         break;
+      case "subworkflow":
+        checkSubworkflow(node, opts, add);
+        break;
       default:
         break;
     }
@@ -743,7 +844,7 @@ function hasControlCycleOutsideLoop(graph: WorkflowGraph, nodeIds: Set<string>):
 // Public API
 // ---------------------------------------------------------------------------
 
-export function validateWorkflow(input: unknown): ValidationResult {
+export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): ValidationResult {
   const parsed = workflowGraphSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -756,13 +857,13 @@ export function validateWorkflow(input: unknown): ValidationResult {
     };
   }
   const graph = parsed.data as unknown as WorkflowGraph;
-  const issues = semanticIssues(graph);
+  const issues = semanticIssues(graph, opts);
   return issues.length === 0 ? { ok: true, graph } : { ok: false, issues };
 }
 
 /** Throws on the first batch of validation issues; returns the typed graph otherwise. */
-export function assertValidWorkflow(input: unknown): WorkflowGraph {
-  const result = validateWorkflow(input);
+export function assertValidWorkflow(input: unknown, opts: ValidateOptions = {}): WorkflowGraph {
+  const result = validateWorkflow(input, opts);
   if (!result.ok) {
     const detail = result.issues.map((i) => `  [${i.invariant}] ${i.message}${i.path ? ` (${i.path})` : ""}`).join("\n");
     throw new Error(`Invalid WorkflowGraph:\n${detail}`);
