@@ -562,6 +562,8 @@ export type NodeEmitter<N extends WorkflowNode = WorkflowNode> = (
 // (Descriptions for now; the executable validator lands with zod in a later pass.)
 // ---------------------------------------------------------------------------
 
+export * from "./validate.js";
+
 export interface Invariant {
   id: string;
   description: string;
