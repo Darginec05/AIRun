@@ -1,10 +1,7 @@
 // @airun/compiler — IR → TypeScript on @airun/sdk.
 //
-// A per-node-type emitter registry (pure: (node, ctx) => string) plus a
-// control-flow walker: router → switch/if-diamond, parallel → step.parallel,
-// back-edge → bounded loop, linear → sequential awaits. EmitContext supplies
-// stable identifiers, resolve() for bindings, cycle detection, import set.
-// Topo-sort runs over the data-flow graph (acyclic); control edges may cycle.
-// Implementation not started yet.
+// compileWorkflow(graph) walks the control-flow graph from the trigger and emits
+// a `defineWorkflow({...})` module on the @airun/sdk surface. See compile.ts for
+// the walker and per-node-type emission rules.
 
-export {};
+export * from "./compile.js";

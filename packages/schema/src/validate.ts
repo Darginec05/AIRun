@@ -12,7 +12,6 @@ import { z } from "zod";
 import type {
   Binding,
   DataType,
-  JSONSchema,
   JSONValue,
   PortDirection,
   PortKind,

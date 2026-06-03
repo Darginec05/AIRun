@@ -195,7 +195,7 @@ export const invoiceGraph = {
       config: {
         toolId: "postLedger",
         args: {
-          data: { kind: "ref", nodeId: "extract", path: "result" },
+          data: { kind: "ref", nodeId: "extract" },
         },
         onError: {
           kind: "retry",
@@ -230,8 +230,18 @@ export const invoiceGraph = {
         { id: "value", kind: "data", direction: "in", name: "value", dataType: "any" },
       ],
       config: {
-        value: { kind: "ref", nodeId: "postToLedger", path: "result" },
+        value: { kind: "ref", nodeId: "postToLedger" },
         schema: "LedgerResult",
+      },
+    },
+    {
+      id: "rejectedOut",
+      type: "output",
+      label: "Rejected",
+      layout: { x: 960, y: 0 },
+      ports: [{ id: "in", kind: "control", direction: "in", name: "in" }],
+      config: {
+        value: { kind: "literal", value: { status: "rejected" } },
       },
     },
   ],
@@ -242,7 +252,7 @@ export const invoiceGraph = {
     { id: "e3", kind: "control", from: { nodeId: "needsApproval", portId: "branch:high" }, to: { nodeId: "approve", portId: "in" } },
     { id: "e4", kind: "control", from: { nodeId: "needsApproval", portId: "branch:else" }, to: { nodeId: "postToLedger", portId: "in" } },
     { id: "e5", kind: "control", from: { nodeId: "approve", portId: "approved" }, to: { nodeId: "postToLedger", portId: "in" } },
-    { id: "e6", kind: "control", from: { nodeId: "approve", portId: "rejected" }, to: { nodeId: "out", portId: "in" } },
+    { id: "e6", kind: "control", from: { nodeId: "approve", portId: "rejected" }, to: { nodeId: "rejectedOut", portId: "in" } },
     { id: "e7", kind: "control", from: { nodeId: "postToLedger", portId: "out" }, to: { nodeId: "recordProcessed", portId: "in" } },
     { id: "e8", kind: "control", from: { nodeId: "recordProcessed", portId: "out" }, to: { nodeId: "out", portId: "in" } },
     { id: "d1", kind: "data", from: { nodeId: "postToLedger", portId: "result" }, to: { nodeId: "out", portId: "value" } },
