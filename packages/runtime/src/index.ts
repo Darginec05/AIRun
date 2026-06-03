@@ -1,10 +1,35 @@
-// @airun/runtime — the durable execution engine (the hard 90%).
+// @airun/runtime — the durable execution engine.
 //
-// A Postgres step journal records every completed step's result; on restart the
-// workflow replays and completed steps are served from the journal instead of
-// re-executing, so step.approval / step.input waits survive restarts. The same
-// journal is the source of truth for live-run and observability traces.
-// Single-node self-host core; the multi-tenant scheduler is a private repo.
-// Implementation not started yet.
+// Generated workflows import their primitives from @airun/sdk; this package
+// installs the adapter those primitives delegate to. A step journal records
+// every completed step so replays serve them instead of re-executing, which is
+// what makes side effects fire once and approval/input waits survive restarts.
+// v1 ships an in-memory journal behind the Journal port; a Postgres adapter is
+// the next step against the same interface.
 
-export {};
+export { createRuntime } from "./run.js";
+export type { Runtime, RunResult } from "./run.js";
+
+export { InMemoryJournal } from "./journal.js";
+export type { Journal, RunRecord, RunStatus, StepLookup } from "./journal.js";
+
+export { Suspended } from "./context.js";
+export type { PendingWait, RunDeps } from "./context.js";
+
+export {
+  envSecretResolver,
+  fetchHttpClient,
+  stubModelClient,
+} from "./ports.js";
+export type {
+  AgentDecision,
+  AgentStepRequest,
+  AgentTurn,
+  ClassifyRequest,
+  GenerateRequest,
+  HttpClient,
+  HttpRequest,
+  HttpResponse,
+  ModelClient,
+  SecretResolver,
+} from "./ports.js";

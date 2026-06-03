@@ -1,9 +1,16 @@
 // @airun/sdk — the hand-written primitive surface (the product moat).
 //
-// This file is the SURFACE only: types plus `declare`d bindings. No runtime
-// implementation yet — the agent loop, durability, retries and approvals will be
-// implemented here (and in @airun/runtime), not in generated code. Because the
-// symbols are `declare`d, this module emits no JS, only .d.ts.
+// This file is the authoring surface: the types the compiler targets plus thin
+// primitive implementations. The primitives carry no durability logic of their
+// own — they delegate to the RuntimeAdapter bound for the current run (see the
+// "runtime binding" section at the bottom). The hard 90% (step journal, replay,
+// retries, approvals, the agent loop) lives in @airun/runtime, which installs an
+// adapter via installRuntimeResolver(). Outside a run, the primitives throw.
+//
+// Factories that run at module-load time (tool.*, state, trigger) return
+// descriptors/handles; their *operations* delegate to the adapter at call time,
+// so a `const t = tool.http(...)` at module scope is fine and only `await t(...)`
+// inside a run touches the runtime.
 //
 // The surface is deliberately aligned with the @airun/schema IR so the compiler
 // can map node configs onto these primitives 1:1 (stopWhen↔StopCondition,
@@ -34,15 +41,21 @@ export type Conversation = Message[];
 // Triggers — onEvent / onSchedule / onWebhook (no "manual")
 // ---------------------------------------------------------------------------
 
+export type TriggerDescriptor =
+  | { kind: "event"; eventName: string }
+  | { kind: "schedule"; cron: string; timezone?: string }
+  | { kind: "webhook"; path: string; method: HttpMethod };
+
 export interface Trigger<TPayload> {
   readonly _payload?: TPayload;
+  readonly descriptor: TriggerDescriptor;
 }
 
 export interface ScheduleTick {
   scheduledAt: string;
 }
 
-export declare const trigger: {
+export interface TriggerApi {
   /** Event payload is typed from the schema when provided. */
   onEvent<T = unknown>(eventName: string, schema?: Schema<T>): Trigger<T>;
   onSchedule(cron: string, opts?: { timezone?: string }): Trigger<ScheduleTick>;
@@ -51,6 +64,21 @@ export declare const trigger: {
     method: HttpMethod;
     schema?: Schema<T>;
   }): Trigger<T>;
+}
+
+// Triggers don't execute during a run — the runtime delivers the payload as
+// ctx.event. The descriptor is captured for the (future) scheduler/dispatcher.
+function makeTrigger<T>(descriptor: TriggerDescriptor): Trigger<T> {
+  return { descriptor } as Trigger<T>;
+}
+
+export const trigger: TriggerApi = {
+  onEvent: <T = unknown>(eventName: string): Trigger<T> =>
+    makeTrigger<T>({ kind: "event", eventName }),
+  onSchedule: (cron: string, opts?: { timezone?: string }): Trigger<ScheduleTick> =>
+    makeTrigger<ScheduleTick>({ kind: "schedule", cron, timezone: opts?.timezone }),
+  onWebhook: <T = unknown>(opts: { path: string; method: HttpMethod }): Trigger<T> =>
+    makeTrigger<T>({ kind: "webhook", path: opts.path, method: opts.method }),
 };
 
 // ---------------------------------------------------------------------------
@@ -83,7 +111,15 @@ export interface ToolFactory {
   }): Tool<TArgs, TResult>;
 }
 
-export declare const tool: ToolFactory;
+function makeTool<TArgs, TResult>(def: ToolDescriptor<TArgs, TResult>): Tool<TArgs, TResult> {
+  const invoke = (args: TArgs): Promise<TResult> => currentRuntime().callTool(def, args);
+  return Object.assign(invoke, { id: def.id });
+}
+
+export const tool: ToolFactory = {
+  http: (opts) => makeTool({ kind: "http", ...opts }),
+  fn: (opts) => makeTool({ kind: "fn", ...opts }),
+};
 
 // ---------------------------------------------------------------------------
 // AI — generate / classify / agent
@@ -114,10 +150,14 @@ export type StopWhen =
   | { kind: "condition"; predicate: (info: AgentStepInfo) => boolean }
   | { kind: "any"; conditions: StopWhen[] };
 
-export declare const stop: {
+export const stop: {
   maxSteps(value: number): StopWhen;
   noToolUse(): StopWhen;
   toolCalled(tool: Tool): StopWhen;
+} = {
+  maxSteps: (value) => ({ kind: "maxSteps", value }),
+  noToolUse: () => ({ kind: "noToolUse" }),
+  toolCalled: (t) => ({ kind: "toolCalled", tool: t }),
 };
 
 export interface AgentOptions<T> {
@@ -143,7 +183,13 @@ export interface AI {
   agent(opts: AgentOptions<string> & { schema?: undefined }): Promise<string>;
 }
 
-export declare const ai: AI;
+export const ai: AI = {
+  generate: ((opts: GenerateTextOptions | GenerateObjectOptions<unknown>): Promise<unknown> =>
+    currentRuntime().generate(opts)) as AI["generate"],
+  classify: (opts) => currentRuntime().classify(opts),
+  agent: ((opts: AgentOptions<unknown>): Promise<unknown> =>
+    currentRuntime().agent(opts)) as AI["agent"],
+};
 
 // ---------------------------------------------------------------------------
 // step.* — durable units, control flow, human-in-the-loop
@@ -215,13 +261,56 @@ export interface Step {
   ): Promise<void>;
 }
 
-export declare const step: Step;
+export const step: Step = {
+  run: (name, fn) => currentRuntime().stepRun(name, fn),
+  // transform is a pure, synchronous data transform — no durability needed.
+  transform: (input, fn) => fn(input),
+  route: async ({ input, routes, fallback }) => {
+    const key = String(input);
+    const branch = (routes as Record<string, () => Promise<void> | void>)[key] ?? fallback;
+    if (branch) await branch();
+  },
+  parallel: (branches) =>
+    Promise.all((branches as ReadonlyArray<() => Promise<unknown>>).map((b) => b())) as Promise<never>,
+  parallelMap: async (collection, body, opts) => {
+    const results: Awaited<ReturnType<typeof body>>[] = new Array(collection.length);
+    const lanes = Math.max(1, Math.min(opts?.maxConcurrency ?? collection.length, collection.length));
+    let cursor = 0;
+    const worker = async (): Promise<void> => {
+      while (cursor < collection.length) {
+        const i = cursor++;
+        results[i] = await body(collection[i]!, i);
+      }
+    };
+    await Promise.all(Array.from({ length: lanes }, () => worker()));
+    return results;
+  },
+  approval: (opts) => currentRuntime().approval(opts),
+  input: (opts) => currentRuntime().input(opts),
+  invoke: (workflow, input) => currentRuntime().invoke(workflow, input),
+  forEach: async (collection, body) => {
+    for (let i = 0; i < collection.length; i++) await body(collection[i]!, i);
+  },
+  while: async (condition, body, opts) => {
+    const max = opts?.maxIterations ?? Number.POSITIVE_INFINITY;
+    let iterations = 0;
+    while (await condition()) {
+      if (iterations++ >= max) break;
+      await body();
+    }
+  },
+};
 
 // ---------------------------------------------------------------------------
 // state.* — run / session / persistent
 // ---------------------------------------------------------------------------
 
 export type StateScope = "run" | "session" | "persistent";
+
+export interface StateOpts<T> {
+  scope: StateScope;
+  initial?: T;
+}
 
 export interface StateHandle<T> {
   get(): Promise<T>;
@@ -231,10 +320,15 @@ export interface StateHandle<T> {
 }
 
 export interface StateFactory {
-  <T>(name: string, opts: { scope: StateScope; initial?: T }): StateHandle<T>;
+  <T>(name: string, opts: StateOpts<T>): StateHandle<T>;
 }
 
-export declare const state: StateFactory;
+export const state: StateFactory = <T>(name: string, opts: StateOpts<T>): StateHandle<T> => ({
+  get: () => currentRuntime().stateGet<T>(name, opts),
+  set: (value) => currentRuntime().stateSet<T>(name, opts, value),
+  append: (item) => currentRuntime().stateAppend<T>(name, opts, item),
+  merge: (partial) => currentRuntime().stateMerge<T>(name, opts, partial),
+});
 
 // ---------------------------------------------------------------------------
 // defineWorkflow
@@ -260,6 +354,102 @@ export interface WorkflowDef<TPayload, TOutput> {
   run: (ctx: WorkflowContext<TPayload>) => Promise<TOutput>;
 }
 
-export declare function defineWorkflow<TPayload, TOutput>(
+const workflowRegistry = new WeakMap<WorkflowRef<unknown, unknown>, WorkflowDef<unknown, unknown>>();
+
+export function defineWorkflow<TPayload, TOutput>(
   def: WorkflowDef<TPayload, TOutput>,
-): WorkflowRef<TPayload, TOutput>;
+): WorkflowRef<TPayload, TOutput> {
+  const ref: WorkflowRef<TPayload, TOutput> = { id: def.id };
+  workflowRegistry.set(
+    ref as WorkflowRef<unknown, unknown>,
+    def as unknown as WorkflowDef<unknown, unknown>,
+  );
+  return ref;
+}
+
+/** The runtime reads the captured def to execute a workflow by reference. */
+export function getWorkflowDef<TPayload, TOutput>(
+  ref: WorkflowRef<TPayload, TOutput>,
+): WorkflowDef<TPayload, TOutput> | undefined {
+  return workflowRegistry.get(ref as WorkflowRef<unknown, unknown>) as
+    | WorkflowDef<TPayload, TOutput>
+    | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime binding
+// ---------------------------------------------------------------------------
+//
+// The primitives above are thin: each durable operation delegates to the
+// RuntimeAdapter bound for the current run. @airun/runtime installs a resolver
+// (backed by AsyncLocalStorage) via installRuntimeResolver(); the SDK itself
+// stays free of any Node dependency. Outside a run, currentRuntime() throws.
+
+/** A tool's captured configuration; the runtime invokes it as a durable step. */
+export type ToolDescriptor<TArgs, TResult> =
+  | {
+      kind: "http";
+      id: string;
+      name?: string;
+      description?: string;
+      method: HttpMethod;
+      url: string;
+      headers?: Record<string, string>;
+      query?: Record<string, string>;
+      body?: (args: TArgs) => unknown;
+      auth?: { secret: string };
+    }
+  | {
+      kind: "fn";
+      id: string;
+      name?: string;
+      description?: string;
+      handler: (args: TArgs) => Promise<TResult> | TResult;
+    };
+
+/**
+ * The operations the SDK primitives delegate to. @airun/runtime implements this
+ * with a step journal (durability), the agent loop, retries, approvals and
+ * state. Everything here runs inside an active workflow run.
+ */
+export interface RuntimeAdapter {
+  stepRun<T>(name: string, fn: () => Promise<T> | T): Promise<T>;
+  callTool<TArgs, TResult>(def: ToolDescriptor<TArgs, TResult>, args: TArgs): Promise<TResult>;
+  generate<T>(opts: GenerateTextOptions | GenerateObjectOptions<T>): Promise<T | string>;
+  classify<L extends string>(opts: {
+    model: string;
+    input: string;
+    labels: readonly L[];
+    instructions?: string;
+  }): Promise<L>;
+  agent<T>(opts: AgentOptions<T>): Promise<T | string>;
+  approval(opts: ApprovalOptions): Promise<ApprovalResult>;
+  input<T extends Record<string, unknown>>(opts: {
+    prompt: string;
+    fields: { [K in keyof T]: FieldSpec<T[K]> };
+    assignee?: string;
+    timeout?: Duration;
+  }): Promise<T>;
+  invoke<TInput, TOutput>(ref: WorkflowRef<TInput, TOutput>, input: TInput): Promise<TOutput>;
+  stateGet<T>(name: string, opts: StateOpts<T>): Promise<T>;
+  stateSet<T>(name: string, opts: StateOpts<T>, value: T): Promise<void>;
+  stateAppend<T>(name: string, opts: StateOpts<T>, item: unknown): Promise<void>;
+  stateMerge<T>(name: string, opts: StateOpts<T>, partial: unknown): Promise<void>;
+}
+
+let runtimeResolver: (() => RuntimeAdapter) | null = null;
+
+/** Called once by @airun/runtime to wire the active-run adapter lookup. */
+export function installRuntimeResolver(resolver: () => RuntimeAdapter): void {
+  runtimeResolver = resolver;
+}
+
+/** The adapter for the current run, or a thrown error if called outside one. */
+export function currentRuntime(): RuntimeAdapter {
+  if (!runtimeResolver) {
+    throw new Error(
+      "No @airun/runtime bound. Execute workflows via @airun/runtime's runWorkflow(); SDK primitives cannot run standalone.",
+    );
+  }
+  return runtimeResolver();
+}

@@ -233,26 +233,45 @@ subworkflow    -> step.invoke
 ```
 
 A workflow compiles to a single `defineWorkflow({ id, on, run })` whose `run`
-receives `{ event, step, ai, state }`. **The agent loop, durability, retries, and
-approvals live in the SDK, not in generated code** — that's the single biggest
-reason to ship an SDK rather than raw `messages.create` calls.
+receives `{ event, step, ai, state }`. The SDK primitives are thin: each durable
+operation delegates to the `RuntimeAdapter` bound for the current run, so **the
+agent loop, durability, retries, and approvals live in `@airun/runtime`, not in
+generated code** (the SDK exposes the contract; the runtime installs the
+implementation via `installRuntimeResolver`). That separation — not raw
+`messages.create` calls in user code — is the single biggest reason to ship an
+SDK. Factories that run at module-load time (`tool.*`, `state`, `trigger`) return
+descriptors/handles whose operations delegate at call time, so a top-level
+`const t = tool.http(...)` is inert until `await t(...)` runs inside a workflow.
 
 ### D. The runtime — `@airun/runtime` (durable execution)
 
-The SDK is only the type/authoring surface; **`@airun/runtime` is what actually
+The SDK is the thin authoring surface; **`@airun/runtime` is what actually
 executes it** — and it is the hard 90% that makes "owned code" more than a toy.
 This is built **for real, not faked**: it is the closest analogue to
 trigger.dev / Inngest / Temporal in this project.
 
-- **Durable by design.** A **step journal** (Postgres) records every completed
-  step's result. On restart the workflow is replayed, but completed steps are
-  served from the journal instead of re-executing. `step.approval` /
-  `step.input` waits survive restarts for free.
+- **Durable by design.** A **step journal** records every completed step's
+  result. On restart the workflow is replayed, but completed steps are served
+  from the journal instead of re-executing — so side effects fire once, state
+  mutates once, and `step.approval` / `step.input` waits survive restarts for
+  free. Suspension is a replay model: an unresolved wait throws, the run reports
+  its pending waits, and `resume()` re-runs from the top with the wait's result
+  now journaled.
 - **One journal, two payoffs.** The same journal is the source of truth for
   durability **and** for the **live-run / observability traces** (see §14).
-- **Self-host first.** A single-node, Postgres-backed runtime that genuinely
-  works self-hosted is the open-source core. The multi-tenant managed scheduler
-  is the commercial layer and lives in a private repo (see §15).
+- **Self-host first.** A single-node runtime that genuinely works self-hosted is
+  the open-source core. The multi-tenant managed scheduler is the commercial
+  layer and lives in a private repo (see §15).
+
+**v1 status.** The engine is implemented: `AsyncLocalStorage`-bound run context,
+deterministic step keys, the durable-step memoizer, the agent loop with
+`stopWhen`, state ops, and approval/input suspension. The journal sits behind a
+`Journal` **port** with an in-memory implementation (the canonical store for
+dev + tests); the **Postgres adapter is the next step against the same
+interface**. External effects are ports too — `ModelClient` (a deterministic
+stub by default; a real LLM is a drop-in adapter), `HttpClient` (global `fetch`),
+and `SecretResolver` (env-backed; **secrets are resolved at call time, never
+inlined**). Entry points: `createRuntime(deps?)` → `{ run, resume }`.
 
 ---
 
