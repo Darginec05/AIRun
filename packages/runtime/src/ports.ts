@@ -1,7 +1,8 @@
 // External effects the runtime depends on, behind small ports so the durable
 // core stays testable. The defaults are genuine (real fetch, env-backed
-// secrets) except the model client, which is a deterministic stub — wiring a
-// real LLM is a drop-in adapter, not a change to the engine.
+// secrets); the default model client is a deterministic stub, with a real
+// Anthropic adapter shipping alongside it (see anthropic.ts) — wiring a real LLM
+// is a drop-in adapter, not a change to the engine.
 
 import type { HttpMethod } from "@airun/sdk";
 

@@ -231,28 +231,17 @@ export class WorkflowRuntimeAdapter implements RuntimeAdapter {
   }
 
   async stateAppend<T>(name: string, opts: StateOpts<T>, item: unknown): Promise<void> {
+    // Delegated so the journal can apply it atomically; the durable wrapper still
+    // guarantees it fires once per run (replays skip it).
     await this.durable<null>(`state.append:${name}`, async () => {
-      const scope = this.scopeKey(opts.scope);
-      const cur = await this.ctx.deps.journal.getState(scope, name);
-      const base = cur.found ? cur.result : opts.initial;
-      const next = Array.isArray(base) ? [...base] : [];
-      next.push(item);
-      await this.ctx.deps.journal.putState(scope, name, next);
+      await this.ctx.deps.journal.appendState(this.scopeKey(opts.scope), name, item, opts.initial);
       return null;
     });
   }
 
   async stateMerge<T>(name: string, opts: StateOpts<T>, partial: unknown): Promise<void> {
     await this.durable<null>(`state.merge:${name}`, async () => {
-      const scope = this.scopeKey(opts.scope);
-      const cur = await this.ctx.deps.journal.getState(scope, name);
-      const base = cur.found ? cur.result : opts.initial;
-      const next =
-        base && typeof base === "object" && !Array.isArray(base)
-          ? { ...(base as Record<string, unknown>) }
-          : {};
-      Object.assign(next, partial);
-      await this.ctx.deps.journal.putState(scope, name, next);
+      await this.ctx.deps.journal.mergeState(this.scopeKey(opts.scope), name, partial, opts.initial);
       return null;
     });
   }

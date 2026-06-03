@@ -266,12 +266,15 @@ trigger.dev / Inngest / Temporal in this project.
 **v1 status.** The engine is implemented: `AsyncLocalStorage`-bound run context,
 deterministic step keys, the durable-step memoizer, the agent loop with
 `stopWhen`, state ops, and approval/input suspension. The journal sits behind a
-`Journal` **port** with an in-memory implementation (the canonical store for
-dev + tests); the **Postgres adapter is the next step against the same
-interface**. External effects are ports too — `ModelClient` (a deterministic
-stub by default; a real LLM is a drop-in adapter), `HttpClient` (global `fetch`),
-and `SecretResolver` (env-backed; **secrets are resolved at call time, never
-inlined**). Entry points: `createRuntime(deps?)` → `{ run, resume }`.
+`Journal` **port** with two interchangeable implementations: an in-memory store
+(the canonical choice for dev + tests) and a **Postgres adapter** (`postgresJournal`,
+over a driver-agnostic `Queryable` surface that a `pg.Pool` satisfies; values are
+stored under a jsonb envelope and `ensureSchema()` provisions the tables).
+External effects are ports too — `ModelClient` (a deterministic stub by default,
+with a real **Anthropic adapter**, `anthropicModelClient`, shipping alongside it),
+`HttpClient` (global `fetch`), and `SecretResolver` (env-backed; **secrets are
+resolved at call time, never inlined**). Entry points:
+`createRuntime(deps?)` → `{ run, resume }`.
 
 ---
 

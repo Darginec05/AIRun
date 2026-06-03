@@ -1,7 +1,7 @@
 {
   "name": "@airun/runtime",
   "version": "0.0.0",
-  "description": "Durable execution engine: step journal, agent loop, retries, approvals, state, traces. v1 in-memory journal behind a port; Postgres adapter next. Self-host core.",
+  "description": "Durable execution engine: step journal, agent loop, retries, approvals, state, traces. In-memory and Postgres journals behind one port; Anthropic model client. Self-host core.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
