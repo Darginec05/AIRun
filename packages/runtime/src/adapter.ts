@@ -16,6 +16,7 @@ import type {
   RuntimeAdapter,
   StateOpts,
   StopWhen,
+  Tool,
   ToolDescriptor,
   WorkflowRef,
 } from "@airun/sdk";
@@ -128,7 +129,9 @@ export class WorkflowRuntimeAdapter implements RuntimeAdapter {
         toolCalls++;
         const tool = opts.tools.find((t) => t.id === decision.toolId);
         if (!tool) throw new Error(`Agent requested unknown tool "${decision.toolId}".`);
-        const result = await tool(decision.args);
+        // `AnyTool` has a `never` argument so it can hold tools of any shape; the
+        // model supplies args dynamically, so we relax the call here.
+        const result = await (tool as Tool)(decision.args);
         history.push({ toolId: decision.toolId, args: decision.args, result });
       } else {
         output = decision.output;

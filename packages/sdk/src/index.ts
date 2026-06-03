@@ -91,6 +91,14 @@ export interface Tool<TArgs = unknown, TResult = unknown> {
   (args: TArgs): Promise<TResult>;
 }
 
+/**
+ * Any tool, regardless of its concrete argument/result types — what an agent
+ * holds. A `never` argument makes the call signature accept any `Tool<TArgs, …>`
+ * (call-signature params are checked contravariantly under strictFunctionTypes),
+ * so a heterogeneous `AnyTool[]` can carry tools of differing shapes.
+ */
+export type AnyTool = Tool<never, unknown>;
+
 export interface ToolFactory {
   http<TArgs = Record<string, unknown>, TResult = unknown>(opts: {
     id: string;
@@ -146,14 +154,14 @@ export interface AgentStepInfo {
 export type StopWhen =
   | { kind: "maxSteps"; value: number }
   | { kind: "noToolUse" }
-  | { kind: "toolCalled"; tool: Tool }
+  | { kind: "toolCalled"; tool: AnyTool }
   | { kind: "condition"; predicate: (info: AgentStepInfo) => boolean }
   | { kind: "any"; conditions: StopWhen[] };
 
 export const stop: {
   maxSteps(value: number): StopWhen;
   noToolUse(): StopWhen;
-  toolCalled(tool: Tool): StopWhen;
+  toolCalled(tool: AnyTool): StopWhen;
 } = {
   maxSteps: (value) => ({ kind: "maxSteps", value }),
   noToolUse: () => ({ kind: "noToolUse" }),
@@ -164,7 +172,7 @@ export interface AgentOptions<T> {
   model: string;
   system?: string | Conversation;
   prompt: string;
-  tools: Tool[];
+  tools: AnyTool[];
   stopWhen: StopWhen | StopWhen[];
   schema?: Schema<T>;
 }

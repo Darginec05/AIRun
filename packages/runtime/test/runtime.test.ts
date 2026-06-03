@@ -193,9 +193,9 @@ describe("agent loop", () => {
         ),
     };
 
-    const echo = tool.fn({
+    const echo = tool.fn<{ i: number }, { echoed: number }>({
       id: "echo",
-      handler: (args: unknown) => args,
+      handler: (args) => ({ echoed: args.i }),
     });
 
     const wf = defineWorkflow<Record<string, never>, { turns: number }>({
