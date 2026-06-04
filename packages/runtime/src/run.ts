@@ -11,6 +11,8 @@ import { activeAdapter, isWaitStepKey, RunContext, runWithin, Suspended } from "
 import type { PendingWait, RunDeps } from "./context.js";
 import { InMemoryJournal } from "./journal.js";
 import { envSecretResolver, fetchHttpClient, stubModelClient } from "./ports.js";
+import { assembleTrace, emitTrace, errorMessage } from "./trace.js";
+import type { RunTrace } from "./trace.js";
 
 // Wire the SDK's primitives to the adapter active for the current async context.
 installRuntimeResolver(() => activeAdapter());
@@ -31,6 +33,8 @@ export interface Runtime {
     stepKey: string,
     result: unknown,
   ): Promise<RunResult<TOutput>>;
+  /** The assembled observability timeline for a run (§14). */
+  trace(runId: string): Promise<RunTrace>;
 }
 
 function withDefaults(overrides?: Partial<RunDeps>): RunDeps {
@@ -39,6 +43,7 @@ function withDefaults(overrides?: Partial<RunDeps>): RunDeps {
     model: overrides?.model ?? stubModelClient,
     http: overrides?.http ?? fetchHttpClient,
     secrets: overrides?.secrets ?? envSecretResolver(),
+    onTrace: overrides?.onTrace,
   };
 }
 
@@ -57,13 +62,21 @@ async function attempt<TPayload, TOutput>(
   try {
     const output = await runWithin(adapter, () => def.run({ event: input, ai, step, state }));
     await deps.journal.setRunStatus(runId, "completed", output);
+    await ctx.trace({ type: "run.completed", runId, at: Date.now(), output });
     return { status: "completed", runId, output };
   } catch (err) {
     if (err instanceof Suspended) {
       await deps.journal.setRunStatus(runId, "suspended");
+      await ctx.trace({
+        type: "run.suspended",
+        runId,
+        at: Date.now(),
+        waits: ctx.waits.map((w) => ({ kind: w.kind, stepKey: w.stepKey })),
+      });
       return { status: "suspended", runId, waits: ctx.waits };
     }
     await deps.journal.setRunStatus(runId, "failed");
+    await ctx.trace({ type: "run.failed", runId, at: Date.now(), error: errorMessage(err) });
     throw err;
   }
 }
@@ -79,6 +92,7 @@ export function createRuntime(overrides?: Partial<RunDeps>): Runtime {
     run: async (ref, input, opts) => {
       const runId = opts?.runId ?? randomUUID();
       await deps.journal.createRun(runId, input);
+      await emitTrace(deps, { type: "run.started", runId, at: Date.now(), input });
       return attempt(ref, input, runId, deps);
     },
     resume: async <TPayload, TOutput>(
@@ -98,7 +112,14 @@ export function createRuntime(overrides?: Partial<RunDeps>): Runtime {
       }
       await deps.journal.putStep(runId, stepKey, result);
       await deps.journal.setRunStatus(runId, "running");
+      await emitTrace(deps, { type: "run.resumed", runId, at: Date.now(), stepKey });
       return attempt(ref, record.input as TPayload, runId, deps);
+    },
+    trace: async (runId: string): Promise<RunTrace> => {
+      const record = await deps.journal.getRun(runId);
+      if (!record) throw new Error(`Unknown run "${runId}".`);
+      const events = await deps.journal.getEvents(runId);
+      return assembleTrace(record, events);
     },
   };
 }

@@ -7,12 +7,16 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Duration, RuntimeAdapter } from "@airun/sdk";
 import type { Journal } from "./journal.js";
 import type { HttpClient, ModelClient, SecretResolver } from "./ports.js";
+import { emitTrace } from "./trace.js";
+import type { TraceEvent } from "./trace.js";
 
 export interface RunDeps {
   journal: Journal;
   model: ModelClient;
   http: HttpClient;
   secrets: SecretResolver;
+  /** Optional live observability sink; receives each trace event as it is emitted. */
+  onTrace?: (event: TraceEvent) => void;
 }
 
 /** A human-in-the-loop wait surfaced when its result has not been delivered yet. */
@@ -63,6 +67,11 @@ export class RunContext {
     const n = (this.ordinals.get(label) ?? 0) + 1;
     this.ordinals.set(label, n);
     return `${label}#${n}`;
+  }
+
+  /** Persist a trace event for this run and notify the live sink. */
+  trace(event: TraceEvent): Promise<void> {
+    return emitTrace(this.deps, event);
   }
 }
 

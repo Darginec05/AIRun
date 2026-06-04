@@ -22,6 +22,7 @@ import type {
 } from "@airun/sdk";
 import { RunContext, Suspended, WAIT_STEP_LABELS } from "./context.js";
 import type { AgentDecision, AgentTurn } from "./ports.js";
+import { errorMessage } from "./trace.js";
 
 const MAX_AGENT_STEPS = 100;
 
@@ -33,10 +34,40 @@ export class WorkflowRuntimeAdapter implements RuntimeAdapter {
   private async durable<T>(label: string, exec: () => Promise<T> | T): Promise<T> {
     const key = this.ctx.nextStepKey(label);
     const found = await this.ctx.deps.journal.getStep(this.ctx.runId, key);
-    if (found.found) return found.result as T;
-    const result = await exec();
-    await this.ctx.deps.journal.putStep(this.ctx.runId, key, result);
-    return result;
+    if (found.found) return found.result as T; // replay: served from journal, not traced
+    const runId = this.ctx.runId;
+    const startedAt = Date.now();
+    await this.ctx.trace({ type: "step.started", runId, at: startedAt, stepKey: key, label });
+    try {
+      const result = await exec();
+      await this.ctx.deps.journal.putStep(runId, key, result);
+      const finishedAt = Date.now();
+      await this.ctx.trace({
+        type: "step.completed",
+        runId,
+        at: finishedAt,
+        stepKey: key,
+        label,
+        durationMs: finishedAt - startedAt,
+        result,
+      });
+      return result;
+    } catch (err) {
+      // A Suspended thrown from within a step is a wait, not a failure — the run
+      // is suspended, so leave it for the run-level event.
+      if (err instanceof Suspended) throw err;
+      const finishedAt = Date.now();
+      await this.ctx.trace({
+        type: "step.failed",
+        runId,
+        at: finishedAt,
+        stepKey: key,
+        label,
+        durationMs: finishedAt - startedAt,
+        error: errorMessage(err),
+      });
+      throw err;
+    }
   }
 
   stepRun<T>(name: string, fn: () => Promise<T> | T): Promise<T> {

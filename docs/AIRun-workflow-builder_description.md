@@ -273,8 +273,12 @@ stored under a jsonb envelope and `ensureSchema()` provisions the tables).
 External effects are ports too — `ModelClient` (a deterministic stub by default,
 with a real **Anthropic adapter**, `anthropicModelClient`, shipping alongside it),
 `HttpClient` (global `fetch`), and `SecretResolver` (env-backed; **secrets are
-resolved at call time, never inlined**). Entry points:
-`createRuntime(deps?)` → `{ run, resume }`.
+resolved at call time, never inlined**). The journal also records an append-only
+**trace event stream** (run lifecycle + per-step timings, status, payloads);
+`createRuntime` accepts an optional live `onTrace` sink, and `trace(runId)`
+assembles the stored events into a `RunTrace` timeline (§14). Replayed steps are
+served from the journal and **not** re-traced, so a trace reflects real work
+once. Entry points: `createRuntime(deps?)` → `{ run, resume, trace }`.
 
 ---
 
@@ -388,6 +392,14 @@ The emotional peak of the story — *describe it → see it built → **watch it
 - **Observability dashboard (`apps/dashboard`).** Your SDK executes, and you can
   watch *how* it ran: run history, traces, step timings, retries, payloads —
   the trigger.dev-style operator view. Retention/scale here is a paid axis (§15).
+
+**Substrate status.** The runtime side is implemented: every run emits an
+append-only trace event stream into the journal (`run.started/resumed/suspended/
+completed/failed` and per-step `started/completed/failed` with timings, status and
+payloads). `createRuntime({ onTrace })` streams events live as they happen (for the
+canvas pulse), and `runtime.trace(runId)` folds the stored stream into a `RunTrace`
+timeline for the dashboard. Both surfaces read this one source of truth; only the
+UIs remain to be built (the canvas is still gated on React Flow).
 
 ---
 

@@ -12,6 +12,7 @@ class FakePg implements Queryable {
   readonly runs = new Map<string, { status: string; input: unknown; output: unknown }>();
   readonly steps = new Map<string, unknown>();
   readonly state = new Map<string, unknown>();
+  readonly events: { runId: string; event: unknown }[] = [];
 
   query<R>(text: string, params: readonly unknown[] = []): Promise<{ rows: R[] }> {
     const sql = text.trim();
@@ -77,6 +78,15 @@ class FakePg implements Queryable {
     if (sql.startsWith("SELECT value FROM airun_state")) {
       const key = pairKey();
       return Promise.resolve(rows(this.state.has(key) ? [{ value: this.state.get(key) }] : []));
+    }
+
+    if (sql.startsWith("INSERT INTO airun_events")) {
+      this.events.push({ runId: params[0] as string, event: json(1) });
+      return Promise.resolve(rows([]));
+    }
+    if (sql.startsWith("SELECT event FROM airun_events")) {
+      const runId = params[0] as string;
+      return Promise.resolve(rows(this.events.filter((e) => e.runId === runId).map((e) => ({ event: e.event }))));
     }
 
     throw new Error(`FakePg: unrecognized statement: ${sql}`);

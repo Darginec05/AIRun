@@ -11,6 +11,7 @@
 // distinction StepLookup.found relies on.
 
 import type { Journal, RunRecord, RunStatus, StepLookup } from "./journal.js";
+import type { TraceEvent } from "./trace.js";
 
 /** A driver-agnostic query surface. `pg.Pool` and `pg.Client` both satisfy it. */
 export interface Queryable {
@@ -36,6 +37,12 @@ CREATE TABLE IF NOT EXISTS airun_state (
   value     jsonb,
   PRIMARY KEY (scope_key, name)
 );
+CREATE TABLE IF NOT EXISTS airun_events (
+  seq    bigserial PRIMARY KEY,
+  run_id text  NOT NULL,
+  event  jsonb NOT NULL
+);
+CREATE INDEX IF NOT EXISTS airun_events_run_idx ON airun_events (run_id, seq);
 `;
 
 interface Envelope {
@@ -169,6 +176,21 @@ export class PostgresJournal implements Journal {
          END || $4::jsonb)`,
       [scopeKey, name, JSON.stringify(seeded), JSON.stringify(partial)],
     );
+  }
+
+  async appendEvent(runId: string, event: TraceEvent): Promise<void> {
+    await this.db.query(`INSERT INTO airun_events (run_id, event) VALUES ($1, $2::jsonb)`, [
+      runId,
+      JSON.stringify(event),
+    ]);
+  }
+
+  async getEvents(runId: string): Promise<TraceEvent[]> {
+    const { rows } = await this.db.query<{ event: TraceEvent }>(
+      `SELECT event FROM airun_events WHERE run_id = $1 ORDER BY seq`,
+      [runId],
+    );
+    return rows.map((r) => r.event);
   }
 }
 

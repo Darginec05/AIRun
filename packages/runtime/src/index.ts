@@ -22,6 +22,9 @@ export type { AnthropicOptions } from "./anthropic.js";
 export { Suspended } from "./context.js";
 export type { PendingWait, RunDeps } from "./context.js";
 
+export { assembleTrace } from "./trace.js";
+export type { RunTrace, StepTrace, TraceEvent } from "./trace.js";
+
 export {
   envSecretResolver,
   fetchHttpClient,
