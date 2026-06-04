@@ -22,4 +22,6 @@ export { ControlEdge, DataEdge } from "./edges.js";
 export type { DataEdgeData } from "./edges.js";
 
 export { Palette } from "./palette.js";
+export { Inspector } from "./inspector.js";
+export type { BindingContext, InspectorProps } from "./inspector.js";
 export { Icon } from "./icons.js";

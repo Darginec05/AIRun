@@ -417,9 +417,44 @@ plus the graph-global acyclicity check (`wouldFormCycle`: the data subgraph stay
 DAG, and control flow may only cycle back through a loop node's `continue` port) —
 drives both React Flow's `isValidConnection` (snap + drop refusal) and the live port
 highlighting (valid targets light up, the source pulses, everything else dims), so
-what lights up is exactly what can be dropped.
-Still to come: inspector forms (C), the live code drawer wired to `@airun/compiler`
-(D), and the live-run overlay (E).
+what lights up is exactly what can be dropped. Phase C adds the inspector: the canvas
+now carries the full IR node in each React Flow node (so it can round-trip a
+`WorkflowGraph`, not just a view model), and selecting a node opens a per-type form
+that renames it and edits its **literal** scalar config (model, prompt, mode, numeric
+bounds, …). Config values are `Binding`s, and every `Bound` field carries a source
+switcher — `literal`, `ref` (another node's output + optional dot-path), `var` (a
+declared workflow variable), or `template` (text + nested-binding segments); the ref/var
+pickers draw their candidates from a `BindingContext` the canvas supplies (other nodes +
+declared variables). List config is editable too: add / remove / rename router routes,
+conditional branches, and human-input fields. Edits re-derive the node's ports and prune
+any edge whose endpoint port no longer exists, so the matching `route:*` / `branch:*` /
+`fields.*` port appears or disappears on the canvas at once. Router routes and
+conditional branches carry a recursive condition editor (`compare` / `and` / `or` /
+`not` / unsafe `expr`) over the IR `Condition`, with each `compare` operand reusing the
+same binding-source switcher — this completes Phase C.
+Phase D adds the live code drawer: a `flowToGraph` reverse adapter folds the canvas
+back into a `WorkflowGraph` (refreshing only `layout` from live positions — never read
+by codegen), and the footer drawer shows the owned `workflow.ts` (`compileWorkflow`)
+and the `workflow.graph.json` serialization, recomputed as the canvas changes. A graph
+that fails validation shows the offending invariants instead of code, and a
+not-yet-supported node type surfaces the compiler's `CompileError`, so the drawer is
+also live validation. Both panes are syntax-highlighted with Shiki (fine-grained core,
+the WASM-free JavaScript regex engine, only the `typescript`/`json` grammars + one dark
+theme), dynamically imported on first open so it splits into its own chunk and never
+weighs down the initial bundle.
+Phase E (slice 1) adds the live-run overlay. `@airun/client` now ships its typed surface
+(`RunClient`/`RunHandle`), the observability wire contract (`TraceEvent`/`RunTrace`/`StepTrace`
++ an incremental `reduceTrace` reducer, mirroring the runtime's internal trace shape), and a
+browser-side `createMockRunClient` that fabricates a plausible trace from a graph — walking it
+in control-flow order from the trigger and keying each step by node id. The builder's topbar
+Run button drives it: a `RunContext` folds the streaming events into per-node status so each
+card paints a running/done/failed ring (idle nodes dim), and a floating trace panel logs the
+steps. The run is simulated by design — the runtime is Node-only (`AsyncLocalStorage`) so it
+can't execute in the browser, and there's no server; the same `RunClient` interface will back a
+real HTTP/SSE client when a runtime server lands. Step-key→node mapping is exact only for the
+mock (it keys by node id); a real run keys steps as `label#ordinal`, so node-level highlighting
+against the real runtime needs a codegen sourcemap — a follow-up.
+Still to come: the real run-server + HTTP/SSE client, and node-level highlighting for real runs.
 
 ---
 

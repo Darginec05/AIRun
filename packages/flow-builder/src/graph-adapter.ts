@@ -4,8 +4,8 @@
 // matching custom edge type so the control/data contract is preserved.
 
 import type { Edge as RFEdge, Node as RFNode } from "reactflow";
-import type { DataType, WorkflowGraph, WorkflowNode } from "@airun/schema";
-import { CATEGORIES, derivePorts, nodeDef } from "@airun/node-registry";
+import type { DataType, Edge, WorkflowGraph, WorkflowNode } from "@airun/schema";
+import { derivePorts } from "@airun/node-registry";
 import type { WorkflowNodeData } from "./nodes.js";
 import type { DataEdgeData } from "./edges.js";
 
@@ -27,22 +27,12 @@ export interface FlowModel {
 export function graphToFlow(graph: WorkflowGraph): FlowModel {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
 
-  const nodes: RFNode<WorkflowNodeData>[] = graph.nodes.map((node) => {
-    const def = nodeDef(node.type);
-    return {
-      id: node.id,
-      type: "workflow",
-      position: { x: node.layout.x, y: node.layout.y },
-      data: {
-        type: node.type,
-        icon: def.icon,
-        label: node.label ?? def.name,
-        technical: def.technical,
-        ports: derivePorts(node),
-        hueVar: CATEGORIES[def.category].hueVar,
-      },
-    };
-  });
+  const nodes: RFNode<WorkflowNodeData>[] = graph.nodes.map((node) => ({
+    id: node.id,
+    type: "workflow",
+    position: { x: node.layout.x, y: node.layout.y },
+    data: { node, ports: derivePorts(node) },
+  }));
 
   const edges: RFEdge<DataEdgeData>[] = graph.edges.map((edge) => {
     const src = byId.get(edge.from.nodeId);
@@ -59,4 +49,31 @@ export function graphToFlow(graph: WorkflowGraph): FlowModel {
   });
 
   return { nodes, edges };
+}
+
+// The reverse of graphToFlow: fold the live canvas back into a WorkflowGraph so it
+// can be compiled or serialized. Each React Flow node already carries its full IR
+// node in `data.node`; we only refresh `layout` from the live position (purely
+// visual — never read by codegen). Everything not represented on the canvas
+// (variables, tools, schemas, secrets, metadata, identity) is taken from `base`.
+export function flowToGraph(
+  base: WorkflowGraph,
+  nodes: RFNode<WorkflowNodeData>[],
+  edges: RFEdge<DataEdgeData>[],
+): WorkflowGraph {
+  const irNodes: WorkflowNode[] = nodes.map((n) => ({
+    ...n.data.node,
+    layout: { ...n.data.node.layout, x: n.position.x, y: n.position.y },
+  }));
+
+  const irEdges: Edge[] = edges
+    .filter((e) => e.sourceHandle && e.targetHandle)
+    .map((e) => ({
+      id: e.id,
+      kind: e.type === "data" ? "data" : "control",
+      from: { nodeId: e.source, portId: e.sourceHandle as string },
+      to: { nodeId: e.target, portId: e.targetHandle as string },
+    }));
+
+  return { ...base, nodes: irNodes, edges: irEdges };
 }

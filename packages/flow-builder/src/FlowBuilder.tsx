@@ -3,9 +3,10 @@
 // React Flow canvas from a WorkflowGraph and owns the live node/edge view state:
 // drop a palette item to create a node, drag between ports to connect (valid
 // targets light up, invalid drops are refused), select + Delete to remove.
-// It emits a WorkflowGraph and never owns runtime — live-run wiring lands later.
+// It emits a WorkflowGraph and drives the live-run overlay: a simulated trace
+// (via @airun/client's mock run client) streams in and lights up the nodes.
 
-import { useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
 import ReactFlow, {
   addEdge,
   Background,
@@ -21,12 +22,25 @@ import ReactFlow, {
   type Node as RFNode,
   type OnConnectStart,
 } from "reactflow";
-import type { NodeType, WorkflowGraph } from "@airun/schema";
-import { CATEGORIES, createNode, derivePorts, NODE_TYPES } from "@airun/node-registry";
+import type { NodeType, WorkflowGraph, WorkflowNode } from "@airun/schema";
+import { createNode, derivePorts, NODE_TYPES } from "@airun/node-registry";
+import {
+  createMockRunClient,
+  reduceTrace,
+  startTrace,
+  type RunHandle,
+  type RunTrace,
+  type StepStatus,
+  type TraceEvent,
+} from "@airun/client";
 import { WorkflowNodeCard, type WorkflowNodeData } from "./nodes.js";
 import { ControlEdge, DataEdge, type DataEdgeData } from "./edges.js";
 import { Palette } from "./palette.js";
-import { dataTypeLabel, graphToFlow } from "./graph-adapter.js";
+import { Inspector, type BindingContext } from "./inspector.js";
+import { CodeDrawer } from "./code-drawer.js";
+import { RunPanel } from "./run-panel.js";
+import { RunContext, type RunState } from "./run-context.js";
+import { dataTypeLabel, flowToGraph, graphToFlow } from "./graph-adapter.js";
 import {
   canConnect,
   ConnectionContext,
@@ -57,6 +71,11 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
   const [nodes, setNodes, onNodesChange] = useNodesState(model.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(model.edges);
   const [source, setSource] = useState<Endpoint | null>(null);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [trace, setTrace] = useState<RunTrace | null>(null);
+  const [running, setRunning] = useState(false);
+  const runHandle = useRef<RunHandle | null>(null);
+  const runClient = useMemo(() => createMockRunClient(), []);
   const { screenToFlowPosition } = useReactFlow();
   const seq = useRef(0);
   const nextId = (prefix: string): string => {
@@ -78,7 +97,7 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
   }));
 
   const isLoopBack = (nodeId: string, portId: string | null | undefined): boolean =>
-    portId === "continue" && nodes.find((n) => n.id === nodeId)?.data.type === "loop";
+    portId === "continue" && nodes.find((n) => n.id === nodeId)?.data.node.type === "loop";
 
   const isValidConnection = (c: Connection): boolean => {
     const sPort = portOf(c.source, c.sourceHandle);
@@ -122,23 +141,84 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
     const type = raw as NodeType;
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY });
     const id = nextId(type);
-    const def = NODE_TYPES[type];
     const irNode = createNode(type, id, { x: position.x, y: position.y });
     const node: RFNode<WorkflowNodeData> = {
       id,
       type: "workflow",
       position,
-      data: {
-        type,
-        icon: def.icon,
-        label: def.name,
-        technical: def.technical,
-        ports: derivePorts(irNode),
-        hueVar: CATEGORIES[def.category].hueVar,
-      },
+      data: { node: irNode, ports: derivePorts(irNode) },
     };
     setNodes((ns) => ns.concat(node));
   };
+
+  // Inspector edits a node's config/label. Re-derive ports (config drives the
+  // dynamic ones) and drop any edge whose endpoint port no longer exists.
+  const updateNode = (next: WorkflowNode): void => {
+    const ports = derivePorts(next);
+    const portIds = new Set(ports.map((p) => p.id));
+    setNodes((ns) => ns.map((n) => (n.id === next.id ? { ...n, data: { node: next, ports } } : n)));
+    setEdges((es) =>
+      es.filter((e) => {
+        if (e.source === next.id && e.sourceHandle && !portIds.has(e.sourceHandle)) return false;
+        if (e.target === next.id && e.targetHandle && !portIds.has(e.targetHandle)) return false;
+        return true;
+      }),
+    );
+  };
+
+  const selectedNodes = nodes.filter((n) => n.selected);
+  const selected = selectedNodes.length === 1 ? selectedNodes[0] : undefined;
+
+  // Candidates for the inspector's ref / var pickers: every other node (a node
+  // can't ref itself) plus the workflow's declared variables.
+  const bindingCtx = useMemo<BindingContext>(
+    () => ({
+      nodes: nodes
+        .filter((n) => n.id !== selected?.id)
+        .map((n) => ({ id: n.id, label: n.data.node.label ?? NODE_TYPES[n.data.node.type].name })),
+      variables: graph.variables.map((v) => v.name),
+    }),
+    [nodes, selected?.id, graph.variables],
+  );
+
+  // The live IR folded back from the canvas — fed to the code drawer to compile
+  // and to the run client to trace.
+  const liveGraph = useMemo(() => flowToGraph(graph, nodes, edges), [graph, nodes, edges]);
+
+  // Trigger a simulated run: stream trace events into a folded RunTrace. The mock
+  // client keys each step by node id, so the canvas overlay maps them directly.
+  const startRun = (): void => {
+    runHandle.current?.cancel();
+    setTrace(null);
+    setRunning(true);
+    const onEvent = (event: TraceEvent): void => {
+      setTrace((prev) =>
+        reduceTrace(prev ?? startTrace(event.runId, event.type === "run.started" ? event.input : null), event),
+      );
+      if (event.type === "run.completed" || event.type === "run.failed") setRunning(false);
+    };
+    runHandle.current = runClient.startRun(liveGraph, { trigger: "manual" }, onEvent);
+  };
+
+  const stopRun = (): void => {
+    runHandle.current?.cancel();
+    runHandle.current = null;
+    setRunning(false);
+  };
+
+  const closeRun = (): void => {
+    stopRun();
+    setTrace(null);
+  };
+
+  useEffect(() => () => runHandle.current?.cancel(), []);
+
+  // Per-node run status the node cards read to paint their rings.
+  const runState = useMemo<RunState>(() => {
+    const byNode = new Map<string, StepStatus>();
+    for (const s of trace?.steps ?? []) byNode.set(s.stepKey, s.status);
+    return { statusOf: (id) => byNode.get(id), active: trace !== null };
+  }, [trace]);
 
   const connection: ConnectionState = {
     source,
@@ -150,12 +230,19 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
   };
 
   return (
-    <div className="wf-shell">
+    <div className={`wf-shell${codeOpen ? " is-code-open" : ""}`}>
       <header className="wf-topbar">
         <span className="wf-brand">Flowsmith</span>
         <span className="wf-topbar-sep" />
         <span className="wf-workflow-name">{graph.name}</span>
         <span className="wf-workflow-ver">v{graph.version}</span>
+        <button
+          type="button"
+          className={`wf-run-trigger${running ? " is-running" : ""}`}
+          onClick={running ? stopRun : startRun}
+        >
+          {running ? "■ Stop" : "▶ Run"}
+        </button>
       </header>
 
       <aside className="wf-palette-zone">
@@ -164,6 +251,7 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
 
       <main className="wf-canvas-zone" onDrop={onDrop} onDragOver={onDragOver}>
         <ConnectionContext.Provider value={connection}>
+         <RunContext.Provider value={runState}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -184,18 +272,25 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
             <MiniMap className="wf-minimap" pannable zoomable />
             <Controls className="wf-controls" showInteractive={false} />
           </ReactFlow>
+         </RunContext.Provider>
         </ConnectionContext.Provider>
+        {trace && <RunPanel trace={trace} running={running} onStop={stopRun} onClose={closeRun} />}
       </main>
 
       <aside className="wf-inspector-zone">
         <div className="wf-zone-title">Inspector</div>
-        <p className="wf-placeholder">Select a node to edit its configuration.</p>
+        {selected ? (
+          <Inspector node={selected.data.node} onChange={updateNode} ctx={bindingCtx} />
+        ) : (
+          <p className="wf-placeholder">
+            {selectedNodes.length > 1
+              ? `${selectedNodes.length} nodes selected.`
+              : "Select a node to edit its configuration."}
+          </p>
+        )}
       </aside>
 
-      <footer className="wf-code-zone">
-        <div className="wf-zone-title">Code</div>
-        <span className="wf-placeholder">workflow.ts · workflow.graph.json</span>
-      </footer>
+      <CodeDrawer graph={liveGraph} open={codeOpen} onSetOpen={setCodeOpen} />
     </div>
   );
 }

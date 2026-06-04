@@ -6,19 +6,17 @@
 
 import { useContext, type CSSProperties, type ReactElement } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
-import type { NodeType, Port } from "@airun/schema";
-import type { IconKey } from "@airun/node-registry";
+import type { Port, WorkflowNode } from "@airun/schema";
+import { CATEGORIES, NODE_TYPES } from "@airun/node-registry";
 import { Icon } from "./icons.js";
 import { ConnectionContext } from "./connection.js";
+import { RunContext } from "./run-context.js";
 
 export interface WorkflowNodeData {
-  type: NodeType;
-  icon: IconKey;
-  label: string;
-  technical: string;
+  /** The IR node — the single source of truth for type, label, and config. */
+  node: WorkflowNode;
+  /** Static + derived ports, materialized for handle rendering. */
   ports: Port[];
-  /** CSS variable name for the category hue, e.g. "--cat-ai". */
-  hueVar: string;
 }
 
 interface PlacedPort {
@@ -36,9 +34,15 @@ function place(ports: Port[], direction: "in" | "out"): PlacedPort[] {
 const isGeneric = (port: Port): boolean => port.name === "in" || port.name === "out";
 
 export function WorkflowNodeCard({ id, data, selected }: NodeProps<WorkflowNodeData>): ReactElement {
+  const def = NODE_TYPES[data.node.type];
+  const label = data.node.label ?? def.name;
   const ins = place(data.ports, "in");
   const outs = place(data.ports, "out");
-  const style = { "--node-hue": `var(${data.hueVar})` } as CSSProperties;
+  const style = { "--node-hue": `var(${CATEGORIES[def.category].hueVar})` } as CSSProperties;
+
+  const run = useContext(RunContext);
+  const runStatus = run.statusOf(id);
+  const runClass = run.active ? (runStatus ? ` is-run-${runStatus}` : " is-run-idle") : "";
 
   const connect = useContext(ConnectionContext);
   const portClass = (port: Port): string => {
@@ -53,7 +57,7 @@ export function WorkflowNodeCard({ id, data, selected }: NodeProps<WorkflowNodeD
   };
 
   return (
-    <div className={`wf-node${selected ? " is-selected" : ""}`} style={style}>
+    <div className={`wf-node${selected ? " is-selected" : ""}${runClass}`} style={style}>
       {ins.map(({ port, top }) => (
         <Handle
           key={port.id}
@@ -74,11 +78,11 @@ export function WorkflowNodeCard({ id, data, selected }: NodeProps<WorkflowNodeD
 
       <div className="wf-node-head">
         <span className="wf-node-icon">
-          <Icon name={data.icon} />
+          <Icon name={def.icon} />
         </span>
         <div className="wf-node-titles">
-          <div className="wf-node-name">{data.label}</div>
-          <div className="wf-node-type">{data.technical}</div>
+          <div className="wf-node-name">{label}</div>
+          <div className="wf-node-type">{def.technical}</div>
         </div>
       </div>
 
