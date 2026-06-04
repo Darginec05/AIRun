@@ -33,7 +33,7 @@ export function RunPanel({ trace, running, onStop, onClose }: RunPanelProps): Re
               Stop
             </button>
           )}
-          <button type="button" className="wf-run-btn" onClick={onClose} title="Close">
+          <button type="button" className="wf-run-btn" onClick={onClose} title="Close" aria-label="Close run panel">
             ✕
           </button>
         </span>

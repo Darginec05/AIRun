@@ -636,6 +636,16 @@ function semanticIssues(graph: WorkflowGraph, opts: ValidateOptions): Validation
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   const nodeIds = new Set(nodeById.keys());
   const varNames = new Set(graph.variables.map((v) => v.name));
+  // Loop and parallel-map nodes introduce an implicitly-declared item variable,
+  // scoped to their body. Treat those names as declared so `var` bindings inside
+  // the body resolve. (Scope is not enforced here — the compiler binds them as
+  // local params; out-of-scope reads simply produce an undefined state read.)
+  for (const n of graph.nodes) {
+    if (n.type === "loop" && n.config.itemVar) varNames.add(n.config.itemVar);
+    if (n.type === "parallel" && n.config.mode === "map" && n.config.itemVar) {
+      varNames.add(n.config.itemVar);
+    }
+  }
   const toolIds = new Set(graph.tools.map((t) => t.id));
   const schemaIds = new Set(Object.keys(graph.schemas));
   const secretNames = new Set(graph.secrets.map((s) => s.name));
@@ -830,12 +840,13 @@ function hasCycle(graph: WorkflowGraph, kind: PortKind, nodeIds: Set<string>): b
 
 function hasControlCycleOutsideLoop(graph: WorkflowGraph, nodeIds: Set<string>): boolean {
   const loopIds = new Set(graph.nodes.filter((n) => n.type === "loop").map((n) => n.id));
-  // Legal back-edges return into a loop's "continue" port; exclude them, then any
-  // remaining control cycle is illegal.
-  const adj = buildAdjacency(
-    graph,
-    (e) => e.kind === "control" && !(loopIds.has(e.to.nodeId) && e.to.portId === "continue"),
-  );
+  const parallelIds = new Set(graph.nodes.filter((n) => n.type === "parallel").map((n) => n.id));
+  // Legal back-edges return into a loop's "continue" port or a parallel's "join"
+  // port; exclude them, then any remaining control cycle is illegal.
+  const isBackEdge = (e: WorkflowGraph["edges"][number]): boolean =>
+    (loopIds.has(e.to.nodeId) && e.to.portId === "continue") ||
+    (parallelIds.has(e.to.nodeId) && e.to.portId === "join");
+  const adj = buildAdjacency(graph, (e) => e.kind === "control" && !isBackEdge(e));
   return detectCycle(adj, nodeIds);
 }
 

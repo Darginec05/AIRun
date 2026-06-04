@@ -7,8 +7,10 @@
 // state become module-level consts. Imports are accumulated and printed once.
 //
 // v1 scope: trigger, llm, tool, transform, state, conditional, router,
-// humanApproval, humanInput, agentLoop, output. parallel/loop/subworkflow throw a
-// CompileError until the dynamic-fan-out / loop / cross-module passes land.
+// humanApproval, humanInput, agentLoop, parallel, loop, output. parallel maps to
+// step.parallel / step.parallelMap (branches / map); loop maps to step.forEach /
+// step.while / a counted for-loop. subworkflow still throws a CompileError until
+// the cross-module reference pass lands.
 
 import { assertValidWorkflow } from "@airun/schema";
 import type {
@@ -95,6 +97,18 @@ class Compiler {
   // before the enclosing statement and referenced by a cached temp const.
   private hoist: { lines: string[]; cache: Map<string, string> } | null = null;
 
+  // Set while emitting a parallel branch or loop body: the node the sub-chain
+  // returns into (a parallel "join" or loop "continue" in-port). When the next
+  // control target equals it, the walk stops; the last linear node becomes the
+  // branch tail (its symbol is the branch's value).
+  private boundary: string | null = null;
+  private branchTail: string | undefined = undefined;
+
+  // Loop/map item variables in scope: var name -> emitted local identifier. A
+  // `var` binding to one of these resolves to the local parameter, never a
+  // state read — the item is loop-local, not a workflow variable.
+  private readonly localVars = new Map<string, string>();
+
   constructor(graph: WorkflowGraph, opts: CompileOptions) {
     this.graph = graph;
     this.sdkModule = opts.sdkModule ?? "@airun/sdk";
@@ -169,6 +183,8 @@ class Compiler {
         return b.path ? `${s}.${b.path}` : s;
       }
       case "var": {
+        const local = this.localVars.get(b.name);
+        if (local) return local;
         if (toolArgs) return `args.${b.name}`;
         this.use("state");
         const handle = this.stateHandle(b.name);
@@ -251,8 +267,39 @@ class Compiler {
     return m;
   }
 
+  /** All control targets leaving a specific out-port (parallel "branch" fans out). */
+  private outTargets(nodeId: string, portId: string): string[] {
+    const out: string[] = [];
+    for (const e of this.graph.edges) {
+      if (e.kind === "control" && e.from.nodeId === nodeId && e.from.portId === portId) {
+        out.push(e.to.nodeId);
+      }
+    }
+    return out;
+  }
+
   private next(nodeId: string): string | undefined {
     return this.controlTargets(nodeId).get("out");
+  }
+
+  /**
+   * Walk a parallel branch / loop body from `headId`, stopping when control
+   * returns into `boundaryId` (the parallel "join" / loop "continue" port).
+   * The last linear node before the boundary is the branch tail; its symbol is
+   * the branch's resolved value.
+   */
+  private walkBounded(headId: string, boundaryId: string): { lines: string[]; resultSym: string } {
+    const prevBoundary = this.boundary;
+    const prevTail = this.branchTail;
+    this.boundary = boundaryId;
+    this.branchTail = undefined;
+    try {
+      const lines = this.walk(headId);
+      return { lines, resultSym: this.branchTail ? this.sym(this.branchTail) : "undefined" };
+    } finally {
+      this.boundary = prevBoundary;
+      this.branchTail = prevTail;
+    }
   }
 
   private walk(nodeId: string): string[] {
@@ -271,7 +318,14 @@ class Compiler {
 
   private continueAfter(nodeId: string): string[] {
     const n = this.next(nodeId);
-    return n ? this.walk(n) : [];
+    if (n === undefined) return [];
+    if (this.boundary !== null && n === this.boundary) {
+      // Reached the join/continue: this node is the branch tail, its value is
+      // the branch result. Stop instead of recursing back into the parent node.
+      this.branchTail = nodeId;
+      return [];
+    }
+    return this.walk(n);
   }
 
   private emit(node: WorkflowNode): string[] {
@@ -435,13 +489,107 @@ class Compiler {
       }
 
       case "parallel":
+        return this.emitParallel(node);
+
       case "loop":
+        return this.emitLoop(node);
+
       case "subworkflow":
         throw new CompileError(`node type '${node.type}' is not supported by v1 codegen yet (node '${node.id}')`);
     }
   }
 
+  private emitParallel(node: Extract<WorkflowNode, { type: "parallel" }>): string[] {
+    this.use("step");
+    const c = node.config;
+    const s = this.sym(node.id);
+    const lines: string[] = [];
+
+    if (c.mode === "branches") {
+      const heads = this.outTargets(node.id, "branch");
+      const branches = heads.map((h) => this.walkBounded(h, node.id));
+      const arrows: string[] = [];
+      for (const b of branches) {
+        arrows.push(`async () => {`, ...indent([...b.lines, `return ${b.resultSym};`]), `},`);
+      }
+      if (c.aggregate.kind === "merge") {
+        lines.push(`const ${s} = await step.parallel([`, ...indent(arrows), `]);`);
+      } else if (c.aggregate.kind === "object") {
+        const parts = this.allocate(`${node.id}Parts`);
+        lines.push(`const ${parts} = await step.parallel([`, ...indent(arrows), `]);`);
+        const entries = c.aggregate.keys
+          .map((k, i) => `${JSON.stringify(k)}: ${parts}[${i}]`)
+          .join(", ");
+        lines.push(`const ${s} = { ${entries} };`);
+      } else {
+        throw new CompileError(
+          `parallel aggregate '${c.aggregate.kind}' is not supported by v1 codegen yet (node '${node.id}')`,
+        );
+      }
+    } else {
+      if (!c.over) throw new CompileError(`parallel map '${node.id}' requires an 'over' collection`);
+      const head = this.outTargets(node.id, "branch")[0];
+      const itemVar = c.itemVar ?? "item";
+      const itemId = this.allocate(itemVar);
+      this.localVars.set(itemVar, itemId);
+      const body = head ? this.walkBounded(head, node.id) : { lines: [], resultSym: "undefined" };
+      this.localVars.delete(itemVar);
+      const over = this.resolve(c.over);
+      const opts = c.maxConcurrency ? `, { maxConcurrency: ${c.maxConcurrency} }` : "";
+      lines.push(
+        `const ${s} = await step.parallelMap(${over}, async (${itemId}) => {`,
+        ...indent([...body.lines, `return ${body.resultSym};`]),
+        `}${opts});`,
+      );
+    }
+
+    return [...lines, ...this.continueAfter(node.id)];
+  }
+
+  private emitLoop(node: Extract<WorkflowNode, { type: "loop" }>): string[] {
+    this.use("step");
+    const c = node.config;
+    const bodyHead = this.outTargets(node.id, "body")[0];
+    const lines: string[] = [];
+
+    if (c.mode === "forEach") {
+      if (!c.collection) throw new CompileError(`loop forEach '${node.id}' requires a collection`);
+      const itemVar = c.itemVar ?? "item";
+      const itemId = this.allocate(itemVar);
+      this.localVars.set(itemVar, itemId);
+      const body = bodyHead ? this.walkBounded(bodyHead, node.id) : { lines: [], resultSym: "" };
+      this.localVars.delete(itemVar);
+      lines.push(
+        `await step.forEach(${this.resolve(c.collection)}, async (${itemId}) => {`,
+        ...indent(body.lines),
+        `});`,
+      );
+    } else if (c.mode === "while") {
+      if (!c.condition) throw new CompileError(`loop while '${node.id}' requires a condition`);
+      const body = bodyHead ? this.walkBounded(bodyHead, node.id) : { lines: [], resultSym: "" };
+      const opts = c.maxIterations !== undefined ? `, { maxIterations: ${c.maxIterations} }` : "";
+      lines.push(
+        `await step.while(async () => ${this.condition(c.condition)}, async () => {`,
+        ...indent(body.lines),
+        `}${opts});`,
+      );
+    } else {
+      if (!c.count) throw new CompileError(`loop count '${node.id}' requires a count`);
+      const i = this.allocate("i");
+      const body = bodyHead ? this.walkBounded(bodyHead, node.id) : { lines: [], resultSym: "" };
+      lines.push(
+        `for (let ${i} = 0; ${i} < ${this.resolve(c.count)}; ${i}++) {`,
+        ...indent(body.lines),
+        `}`,
+      );
+    }
+
+    return [...lines, ...this.branch(this.controlTargets(node.id).get("done"))];
+  }
+
   private branch(target: string | undefined): string[] {
+    if (target === undefined) return [];
+    if (this.boundary !== null && target === this.boundary) return [];
     return target ? this.walk(target) : [];
   }
 

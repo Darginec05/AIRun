@@ -51,6 +51,7 @@
   --radius: 10px;
   --radius-lg: 14px;
   --radius-sm: 7px;
+  --node-w: 224px;
 
   /* Shadows — only for floating things */
   --shadow-node: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
@@ -77,6 +78,65 @@ body {
   font-family: var(--font);
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
+}
+
+/* --- Demo harness: example switcher above the builder ------------------ */
+
+.demo-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.demo-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.demo-bar-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+}
+
+.demo-tabs {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.demo-tab {
+  font-family: var(--font);
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 11px;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.demo-tab:hover {
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+
+.demo-tab.is-active {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
+  border-color: var(--accent-dim);
+}
+
+.demo-canvas {
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- App shell: one grid (DESIGN.md §4) -------------------------------- */
@@ -214,8 +274,39 @@ body {
   border-color: var(--border);
 }
 
-.wf-code-copy {
+.wf-code-validity {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.wf-code-validity.is-ok {
+  color: var(--run-done);
+  border-color: var(--border);
+}
+
+.wf-code-validity.is-bad {
+  color: var(--run-fail);
+  border-color: var(--run-fail);
+}
+
+.wf-code-sync {
+  font-size: 11px;
+  color: var(--text-4);
+}
+
+.wf-code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+}
+
+.wf-code-btn {
   font-size: 11px;
   color: var(--text-3);
   background: var(--panel-2);
@@ -225,8 +316,40 @@ body {
   cursor: pointer;
 }
 
-.wf-code-copy:hover {
+.wf-code-btn:hover:not(:disabled) {
   color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.wf-code-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Top-edge drag affordance; sits above the header so it can grow the grid track. */
+.wf-code-resizer {
+  height: 6px;
+  flex: 0 0 auto;
+  cursor: row-resize;
+  background: transparent;
+  border-top: 1px solid var(--border);
+}
+
+.wf-code-resizer:hover {
+  background: var(--accent-soft);
+}
+
+/* Visually hidden, but announced by screen readers (copy success/failure). */
+.wf-sr-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .wf-code-body {
@@ -285,9 +408,17 @@ body {
 }
 
 .wf-inspector-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding-bottom: 10px;
   margin-bottom: 12px;
   border-bottom: 1px solid var(--border);
+}
+
+.wf-inspector-titles {
+  flex: 1;
+  min-width: 0;
 }
 
 .wf-inspector-name {
@@ -301,6 +432,66 @@ body {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-3);
+}
+
+.wf-inspector-id {
+  flex: 0 0 auto;
+  align-self: center;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-4);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.wf-inspector-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 100%;
+  margin-top: 8px;
+}
+
+.wf-btn-danger {
+  color: var(--run-fail);
+  border-color: var(--run-fail);
+}
+
+.wf-btn-danger:hover:not(:disabled) {
+  color: var(--run-fail);
+  border-color: var(--run-fail);
+}
+
+.wf-inspector-issues {
+  margin-bottom: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--run-fail);
+  border-radius: var(--radius);
+  background: var(--run-fail-glow);
+}
+
+.wf-inspector-issues-head {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--run-fail);
+  margin-bottom: 4px;
+}
+
+.wf-inspector-issues ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.wf-inspector-issues li {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-2);
 }
 
 .wf-inspector-body {
@@ -451,8 +642,10 @@ body {
 }
 
 .wf-bind-tabs {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-self: flex-start;
+  max-width: 100%;
   padding: 2px;
   gap: 2px;
   background: var(--bg);
@@ -658,18 +851,64 @@ body {
 
 .wf-node {
   position: relative;
-  min-width: 180px;
+  width: var(--node-w);
   padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
   background: var(--panel-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow-node);
-  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.16s ease, filter 0.16s ease;
+  animation: wf-node-pop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Faint top-down wash of the category hue — the thing that stops cards reading as
+   flat grey rectangles. Clipped to the top corners; fades to transparent so there
+   is no hard seam. Sits behind the header content (which is lifted to z-index 1). */
+.wf-node::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 64px;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--node-hue) 16%, transparent), transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes wf-node-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.84) translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Hover-focus: when a node is hovered, its neighbours stay lit and everyone else
+   recedes — keeps dense graphs legible. */
+.wf-node.is-faded {
+  opacity: 0.34;
+  filter: saturate(0.6);
+}
+
+/* Ports rail: a dedicated region below the header. Negative horizontal margins
+   pull it out to the node border so handles (left:0 / right:0) sit on the edge,
+   while labels inset by 12px. Height scales with the busier side's port count so
+   each label gets its own row and never collides with the title. */
+.wf-node-ports {
+  position: relative;
+  margin: 9px -12px 0;
+  min-height: calc(var(--port-rows, 1) * 22px);
 }
 
 .wf-node.is-selected {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-node);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft), 0 0 24px var(--accent-glow),
+    var(--shadow-node);
 }
 
 /* Live-run overlay: dim idle nodes, ring the ones the run has touched. */
@@ -704,12 +943,15 @@ body {
 }
 
 .wf-node-head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
 .wf-node-titles {
+  flex: 1;
   min-width: 0;
 }
 
@@ -717,12 +959,43 @@ body {
   color: var(--text);
   font-size: 13px;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wf-node-type {
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--text-3);
+}
+
+/* Run status as a shape glyph (not color alone), pinned to the header's end. */
+.wf-node-run-badge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.wf-node-run-badge.is-run-running {
+  color: var(--run-active);
+}
+
+.wf-node-run-badge.is-run-completed {
+  color: var(--run-done);
+}
+
+.wf-node-run-badge.is-run-failed {
+  color: var(--run-fail);
+}
+
+.wf-node-run-badge.is-run-suspended {
+  color: var(--cat-logic);
 }
 
 /* Ports: small visible dot, generous invisible hit area */
@@ -762,6 +1035,15 @@ body {
   opacity: 0.25;
 }
 
+/* Hovering a port rings it in its own kind's color — a clear "you can grab this". */
+.react-flow__handle.wf-port-control:hover {
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.react-flow__handle.wf-port-data:hover {
+  box-shadow: 0 0 0 4px var(--data-glow);
+}
+
 .wf-port-label {
   position: absolute;
   transform: translateY(-50%);
@@ -781,6 +1063,15 @@ body {
 }
 
 /* --- Edges ------------------------------------------------------------- */
+
+/* Edges fade back with their endpoints under hover-focus. */
+.wf-edge-group {
+  transition: opacity 0.16s ease;
+}
+
+.wf-edge-group.is-faded {
+  opacity: 0.14;
+}
 
 .wf-edge-hit {
   stroke: transparent;
@@ -849,7 +1140,7 @@ body {
 }
 
 .react-flow__background circle {
-  fill: rgba(255, 255, 255, 0.05);
+  fill: rgba(255, 255, 255, 0.09);
 }
 
 .react-flow__controls {
@@ -880,6 +1171,15 @@ body {
 
 .react-flow__minimap-mask {
   fill: rgba(8, 8, 11, 0.6);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+/* Minimap dots carry the category hue (from nodeColor), held back to 0.6 so the
+   viewport rect stays the focal element. */
+.react-flow__minimap-node {
+  opacity: 0.6;
+  rx: 3;
 }
 
 .react-flow__attribution {
@@ -1061,6 +1361,7 @@ body {
   .wf-edge-control-flow {
     animation: none;
   }
+  .wf-node,
   .wf-node.is-run-running,
   .wf-run-step.is-running .wf-run-dot {
     animation: none;

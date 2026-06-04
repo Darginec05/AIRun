@@ -31,6 +31,8 @@ export function Palette(): ReactElement {
     <div className="wf-palette">
       <input
         className="wf-palette-search"
+        type="search"
+        aria-label="Search nodes"
         placeholder="Search nodes…"
         value={query}
         onChange={(e) => setQuery(e.target.value)}

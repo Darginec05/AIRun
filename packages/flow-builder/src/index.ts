@@ -9,8 +9,8 @@
 // Consumers must include React Flow's base stylesheet (`reactflow/dist/style.css`)
 // and the builder stylesheet that defines the design tokens + `wf-*` classes.
 
-export { FlowBuilder } from "./FlowBuilder.js";
-export type { FlowBuilderProps } from "./FlowBuilder.js";
+export { FlowBuilder } from "./flow-builder.js";
+export type { FlowBuilderProps } from "./flow-builder.js";
 
 export { graphToFlow, dataTypeLabel } from "./graph-adapter.js";
 export type { FlowModel } from "./graph-adapter.js";
@@ -23,5 +23,5 @@ export type { DataEdgeData } from "./edges.js";
 
 export { Palette } from "./palette.js";
 export { Inspector } from "./inspector.js";
-export type { BindingContext, InspectorProps } from "./inspector.js";
+export type { BindingContext, InspectorProps, InspectorShellProps } from "./inspector.js";
 export { Icon } from "./icons.js";

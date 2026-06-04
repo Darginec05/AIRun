@@ -56,26 +56,26 @@ export function canConnect(source: Endpoint, target: Endpoint, edges: readonly E
 /**
  * Whether forming the (normalized out→in) edge would close a forbidden cycle.
  * Data edges must keep the data subgraph acyclic; control flow may only loop
- * back through a loop node's `continue` port, so those back-edges are excluded
- * from the reachability check — and a new edge that is itself such a back-edge
- * can never be forbidden. `isLoopBack` reports whether (nodeId, portId) is a
- * loop `continue` port. Mirrors the IR's `data-is-dag` and
- * `control-cycles-only-via-loop` invariants.
+ * back through a loop node's `continue` port or a parallel node's `join` port,
+ * so those back-edges are excluded from the reachability check — and a new edge
+ * that is itself such a back-edge can never be forbidden. `isBackEdge` reports
+ * whether (nodeId, portId) is one of those legal back-edge targets. Mirrors the
+ * IR's `data-is-dag` and `control-cycles-only-via-loop` invariants.
  */
 export function wouldFormCycle(
   source: Endpoint,
   target: Endpoint,
   edges: readonly EdgeLike[],
-  isLoopBack: (nodeId: string, portId: string | null | undefined) => boolean,
+  isBackEdge: (nodeId: string, portId: string | null | undefined) => boolean,
 ): boolean {
   const [from, to] = source.port.direction === "out" ? [source, target] : [target, source];
   const kind = from.port.kind;
-  if (kind === "control" && isLoopBack(to.nodeId, to.port.id)) return false;
+  if (kind === "control" && isBackEdge(to.nodeId, to.port.id)) return false;
 
   const adj = new Map<string, string[]>();
   for (const e of edges) {
     if (e.kind !== kind) continue;
-    if (kind === "control" && isLoopBack(e.target, e.targetHandle)) continue;
+    if (kind === "control" && isBackEdge(e.target, e.targetHandle)) continue;
     const outs = adj.get(e.source);
     if (outs) outs.push(e.target);
     else adj.set(e.source, [e.target]);

@@ -22,8 +22,14 @@ import ReactFlow, {
   type Node as RFNode,
   type OnConnectStart,
 } from "reactflow";
-import type { NodeType, WorkflowGraph, WorkflowNode } from "@airun/schema";
-import { createNode, derivePorts, NODE_TYPES } from "@airun/node-registry";
+import {
+  validateWorkflow,
+  type NodeType,
+  type ValidationIssue,
+  type WorkflowGraph,
+  type WorkflowNode,
+} from "@airun/schema";
+import { CATEGORIES, createNode, derivePorts, NODE_TYPES } from "@airun/node-registry";
 import {
   createMockRunClient,
   reduceTrace,
@@ -40,6 +46,7 @@ import { Inspector, type BindingContext } from "./inspector.js";
 import { CodeDrawer } from "./code-drawer.js";
 import { RunPanel } from "./run-panel.js";
 import { RunContext, type RunState } from "./run-context.js";
+import { FocusContext, type FocusState } from "./focus-context.js";
 import { dataTypeLabel, flowToGraph, graphToFlow } from "./graph-adapter.js";
 import {
   canConnect,
@@ -71,7 +78,9 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
   const [nodes, setNodes, onNodesChange] = useNodesState(model.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(model.edges);
   const [source, setSource] = useState<Endpoint | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
   const [codeOpen, setCodeOpen] = useState(false);
+  const [codeHeight, setCodeHeight] = useState<number | null>(null);
   const [trace, setTrace] = useState<RunTrace | null>(null);
   const [running, setRunning] = useState(false);
   const runHandle = useRef<RunHandle | null>(null);
@@ -96,8 +105,10 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
     kind: e.type === "data" ? "data" : "control",
   }));
 
-  const isLoopBack = (nodeId: string, portId: string | null | undefined): boolean =>
-    portId === "continue" && nodes.find((n) => n.id === nodeId)?.data.node.type === "loop";
+  const isBackEdge = (nodeId: string, portId: string | null | undefined): boolean => {
+    const type = nodes.find((n) => n.id === nodeId)?.data.node.type;
+    return (portId === "continue" && type === "loop") || (portId === "join" && type === "parallel");
+  };
 
   const isValidConnection = (c: Connection): boolean => {
     const sPort = portOf(c.source, c.sourceHandle);
@@ -105,7 +116,7 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
     if (!sPort || !tPort || !c.source || !c.target) return false;
     const from: Endpoint = { nodeId: c.source, port: sPort };
     const to: Endpoint = { nodeId: c.target, port: tPort };
-    return canConnect(from, to, edgeViews) && !wouldFormCycle(from, to, edgeViews, isLoopBack);
+    return canConnect(from, to, edgeViews) && !wouldFormCycle(from, to, edgeViews, isBackEdge);
   };
 
   const onConnect = (c: Connection): void => {
@@ -166,6 +177,28 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
     );
   };
 
+  // Remove a node and any edge touching it (mirrors the Delete-key path).
+  const deleteNode = (id: string): void => {
+    setNodes((ns) => ns.filter((n) => n.id !== id));
+    setEdges((es) => es.filter((e) => e.source !== id && e.target !== id));
+  };
+
+  // Clone a node's config under a fresh id, nudged down-right, and select the copy.
+  // Edges aren't copied — the duplicate starts unconnected.
+  const duplicateNode = (src: RFNode<WorkflowNodeData>): void => {
+    const id = nextId(src.data.node.type);
+    const position = { x: src.position.x + 36, y: src.position.y + 36 };
+    const irNode: WorkflowNode = { ...src.data.node, id, layout: { ...src.data.node.layout, ...position } };
+    const node: RFNode<WorkflowNodeData> = {
+      id,
+      type: "workflow",
+      position,
+      data: { node: irNode, ports: derivePorts(irNode) },
+      selected: true,
+    };
+    setNodes((ns) => ns.map((n): RFNode<WorkflowNodeData> => ({ ...n, selected: false })).concat(node));
+  };
+
   const selectedNodes = nodes.filter((n) => n.selected);
   const selected = selectedNodes.length === 1 ? selectedNodes[0] : undefined;
 
@@ -177,13 +210,25 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
         .filter((n) => n.id !== selected?.id)
         .map((n) => ({ id: n.id, label: n.data.node.label ?? NODE_TYPES[n.data.node.type].name })),
       variables: graph.variables.map((v) => v.name),
+      tools: graph.tools.map((t) => ({ id: t.id, name: t.name })),
     }),
-    [nodes, selected?.id, graph.variables],
+    [nodes, selected?.id, graph.variables, graph.tools],
   );
 
   // The live IR folded back from the canvas — fed to the code drawer to compile
   // and to the run client to trace.
   const liveGraph = useMemo(() => flowToGraph(graph, nodes, edges), [graph, nodes, edges]);
+
+  // Validation issues that name the selected node, surfaced inline in the
+  // inspector. Messages quote the node id ('node_1'), so we match the quoted form
+  // to avoid id-substring false positives.
+  const selectedIssues = useMemo<ValidationIssue[]>(() => {
+    if (!selected) return [];
+    const res = validateWorkflow(liveGraph);
+    if (res.ok) return [];
+    const needle = `'${selected.id}'`;
+    return res.issues.filter((i) => i.message.includes(needle));
+  }, [selected, liveGraph]);
 
   // Trigger a simulated run: stream trace events into a folded RunTrace. The mock
   // client keys each step by node id, so the canvas overlay maps them directly.
@@ -220,17 +265,57 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
     return { statusOf: (id) => byNode.get(id), active: trace !== null };
   }, [trace]);
 
+  // Hover-focus: while a node is hovered (and we're not mid-wiring), light that
+  // node + its direct neighbours and fade the rest. Suppressed during a connect
+  // drag so it doesn't fight the valid-target highlighting.
+  const litNodes = useMemo<Set<string>>(() => {
+    if (!hovered) return new Set();
+    const lit = new Set<string>([hovered]);
+    for (const e of edges) {
+      if (e.source === hovered) lit.add(e.target);
+      if (e.target === hovered) lit.add(e.source);
+    }
+    return lit;
+  }, [hovered, edges]);
+
+  const focus: FocusState = {
+    active: hovered !== null && source === null,
+    isNodeLit: (id) => litNodes.has(id),
+    isEdgeLit: (s, t) => s === hovered || t === hovered,
+  };
+
+  // MiniMap dot color = the node's category hue, resolved from the CSS token so
+  // the map never hard-codes a palette of its own.
+  const hueResolver = useMemo(() => {
+    const cache = new Map<string, string>();
+    const root = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
+    return (n: RFNode<WorkflowNodeData>): string => {
+      const hueVar = CATEGORIES[NODE_TYPES[n.data.node.type].category].hueVar;
+      let hex = cache.get(hueVar);
+      if (hex === undefined) {
+        hex = root?.getPropertyValue(hueVar).trim() || "#6e6e7c";
+        cache.set(hueVar, hex);
+      }
+      return hex;
+    };
+  }, []);
+
   const connection: ConnectionState = {
     source,
     canConnectTo: (targetNodeId, targetPort) => {
       if (!source) return false;
       const target: Endpoint = { nodeId: targetNodeId, port: targetPort };
-      return canConnect(source, target, edgeViews) && !wouldFormCycle(source, target, edgeViews, isLoopBack);
+      return canConnect(source, target, edgeViews) && !wouldFormCycle(source, target, edgeViews, isBackEdge);
     },
   };
 
+  // When the user has dragged the drawer, pin the code grid-track to that height;
+  // otherwise the stylesheet's default (collapsed bar / open band) applies.
+  const shellStyle =
+    codeOpen && codeHeight !== null ? { gridTemplateRows: `46px 1fr ${codeHeight}px` } : undefined;
+
   return (
-    <div className={`wf-shell${codeOpen ? " is-code-open" : ""}`}>
+    <div className={`wf-shell${codeOpen ? " is-code-open" : ""}`} style={shellStyle}>
       <header className="wf-topbar">
         <span className="wf-brand">Flowsmith</span>
         <span className="wf-topbar-sep" />
@@ -240,6 +325,7 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
           type="button"
           className={`wf-run-trigger${running ? " is-running" : ""}`}
           onClick={running ? stopRun : startRun}
+          aria-label={running ? "Stop run" : "Run workflow"}
         >
           {running ? "■ Stop" : "▶ Run"}
         </button>
@@ -252,6 +338,7 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
       <main className="wf-canvas-zone" onDrop={onDrop} onDragOver={onDragOver}>
         <ConnectionContext.Provider value={connection}>
          <RunContext.Provider value={runState}>
+          <FocusContext.Provider value={focus}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -262,6 +349,8 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
             onConnect={onConnect}
             onConnectStart={onConnectStart}
             onConnectEnd={onConnectEnd}
+            onNodeMouseEnter={(_e, n) => setHovered(n.id)}
+            onNodeMouseLeave={() => setHovered(null)}
             isValidConnection={isValidConnection}
             deleteKeyCode={["Backspace", "Delete"]}
             minZoom={0.2}
@@ -269,9 +358,10 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
             fitView
           >
             <Background variant={BackgroundVariant.Dots} gap={22} size={1} className="wf-bg" />
-            <MiniMap className="wf-minimap" pannable zoomable />
+            <MiniMap className="wf-minimap" nodeColor={hueResolver} pannable zoomable />
             <Controls className="wf-controls" showInteractive={false} />
           </ReactFlow>
+          </FocusContext.Provider>
          </RunContext.Provider>
         </ConnectionContext.Provider>
         {trace && <RunPanel trace={trace} running={running} onStop={stopRun} onClose={closeRun} />}
@@ -280,7 +370,14 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
       <aside className="wf-inspector-zone">
         <div className="wf-zone-title">Inspector</div>
         {selected ? (
-          <Inspector node={selected.data.node} onChange={updateNode} ctx={bindingCtx} />
+          <Inspector
+            node={selected.data.node}
+            onChange={updateNode}
+            ctx={bindingCtx}
+            issues={selectedIssues}
+            onDelete={() => deleteNode(selected.id)}
+            onDuplicate={() => duplicateNode(selected)}
+          />
         ) : (
           <p className="wf-placeholder">
             {selectedNodes.length > 1
@@ -290,7 +387,7 @@ function Builder({ graph }: FlowBuilderProps): ReactElement {
         )}
       </aside>
 
-      <CodeDrawer graph={liveGraph} open={codeOpen} onSetOpen={setCodeOpen} />
+      <CodeDrawer graph={liveGraph} open={codeOpen} onSetOpen={setCodeOpen} onHeightChange={setCodeHeight} />
     </div>
   );
 }

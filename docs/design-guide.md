@@ -137,6 +137,22 @@ Rules of thumb:
   more. Multi-select as a list of toggle rows, not a native multi-select.
 - **Friendly name + technical subtitle** on every node and palette item. This is
   the core "non-coder builds, developer owns" idea expressed in one component.
+- **The node card is a header row + a dedicated ports rail below it.** Ports are
+  positioned by vertical % _within the rail_, not across the whole card — laying
+  them over the header makes non-generic port labels (`approved`, `branch:*`)
+  collide with the title (this was a real bug). The rail's height scales with the
+  port count via a `--port-rows` custom property.
+- **No raw IR jargon in the UI.** Binding-source and condition switchers show
+  friendly labels — Value / From node / Variable / Template and Compare / All of /
+  Any of / Not / Expr — never the IR kind names (`literal`, `ref`, `and`, …). A
+  disabled source tab carries a `title` saying _why_ (e.g. "Declare a workflow
+  variable first"), so it's never a dead end.
+- **Validation is surfaced where you act.** The inspector shows the issues that
+  name the selected node inline (matched on the quoted node id in each message),
+  alongside a node-id chip and Duplicate / Delete actions; the code drawer keeps
+  the always-on graph-wide validity badge.
+- **Icon-only controls carry an `aria-label`.** `title` alone is not a reliable
+  accessible name; every ✕ / glyph-only button gets an explicit label.
 
 ---
 
@@ -158,7 +174,7 @@ canvas       pan / zoom / drag / connect / minimap / controls
 palette      searchable grouped draggable node list
 inspector    per-node config forms
 assistant    the AI chat panel
-codedrawer   syntax-highlit code/IR/SDK tabs with live "synced" pulse
+codedrawer   syntax-highlit code/IR tabs; validity badge + synced state, copy/download, drag-to-resize
 app          state + wiring; owns the graph, selection, viewport
 ```
 

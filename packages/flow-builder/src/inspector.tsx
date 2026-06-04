@@ -23,20 +23,30 @@ import type {
   RouteCase,
   TemplateSegment,
   TriggerSpec,
+  ValidationIssue,
   WorkflowNode,
 } from "@airun/schema";
 import { NODE_TYPES } from "@airun/node-registry";
 
-/** Candidates the ref / var pickers offer, supplied by the canvas. */
+/** Candidates the ref / var / tool pickers offer, supplied by the canvas. */
 export interface BindingContext {
   nodes: ReadonlyArray<{ id: string; label: string }>;
   variables: ReadonlyArray<string>;
+  tools: ReadonlyArray<{ id: string; name: string }>;
 }
 
 export interface InspectorProps {
   node: WorkflowNode;
   onChange: (next: WorkflowNode) => void;
   ctx: BindingContext;
+}
+
+/** Inspector chrome (head actions + validation), wired by the canvas. */
+export interface InspectorShellProps extends InspectorProps {
+  /** Validation issues that name this node — surfaced as an inline panel. */
+  issues?: ReadonlyArray<ValidationIssue>;
+  onDelete?: () => void;
+  onDuplicate?: () => void;
 }
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
@@ -47,6 +57,22 @@ const litNum = (value: number): Binding => ({ kind: "literal", value });
 type BindingKind = Binding["kind"];
 type LiteralKind = "text" | "multiline" | "number";
 const BINDING_KINDS = ["literal", "ref", "var", "template"] as const;
+
+// Human labels + tooltips for the binding-source tabs. The IR kind names
+// (literal/ref/var/template) are jargon; the tabs show these instead.
+const BIND_META: Record<BindingKind | "none", { label: string; title: string }> = {
+  none: { label: "None", title: "Leave this field unset" },
+  literal: { label: "Value", title: "A fixed value typed in here" },
+  ref: { label: "From node", title: "Use the output of another node" },
+  var: { label: "Variable", title: "Use a workflow variable" },
+  template: { label: "Template", title: "Compose text with interpolated values" },
+};
+
+// Why a source tab is unavailable, so the disabled state isn't a dead end.
+const BIND_DISABLED_REASON: Partial<Record<BindingKind, string>> = {
+  ref: "Add another node first",
+  var: "Declare a workflow variable first",
+};
 
 // Switching a Bound field's source seeds a fresh binding of the chosen kind,
 // reusing the previous value when the kinds match so a stray click is non-destructive.
@@ -90,6 +116,15 @@ const defaultCondition = (): Condition => ({
 
 const CONDITION_KINDS = ["compare", "and", "or", "not", "expr"] as const;
 const COMPARE_OPS = ["eq", "neq", "gt", "gte", "lt", "lte", "contains", "in"] as const;
+
+// Human labels + tooltips for the condition-kind tabs.
+const COND_META: Record<Condition["kind"], { label: string; title: string }> = {
+  compare: { label: "Compare", title: "Compare two values with an operator" },
+  and: { label: "All of", title: "True when every child condition is true" },
+  or: { label: "Any of", title: "True when any child condition is true" },
+  not: { label: "Not", title: "Inverts the child condition" },
+  expr: { label: "Expr", title: "Advanced: a sandboxed JS expression" },
+};
 
 // Switching a condition's kind keeps the existing children where it can: and/or
 // trade their child lists, not wraps the current condition, and the rest of the
@@ -164,6 +199,7 @@ function BindingSourceTabs({
         // Don't disable the active kind itself, so a binding loaded from the
         // graph stays selectable even when its candidates are momentarily empty.
         const off = k !== "none" && k !== active && (disabled?.has(k) ?? false);
+        const reason = off ? BIND_DISABLED_REASON[k] : undefined;
         return (
           <button
             key={k}
@@ -171,10 +207,11 @@ function BindingSourceTabs({
             role="tab"
             aria-selected={k === active}
             disabled={off}
+            title={reason ?? BIND_META[k].title}
             className={`wf-bind-tab${k === active ? " is-active" : ""}`}
             onClick={() => onSwitch(k)}
           >
-            {k}
+            {BIND_META[k].label}
           </button>
         );
       })}
@@ -182,15 +219,23 @@ function BindingSourceTabs({
   );
 }
 
+interface NumRange {
+  min?: number;
+  max?: number;
+  step?: number;
+}
+
 function LiteralEditor({
   bound,
   literal,
   placeholder,
+  range,
   onChange,
 }: {
   bound: Extract<Binding, { kind: "literal" }>;
   literal: "text" | "multiline" | "number";
   placeholder?: string;
+  range?: NumRange;
   onChange: (b: Binding | undefined) => void;
 }): ReactElement {
   if (literal === "number") {
@@ -201,7 +246,17 @@ function LiteralEditor({
       const n = Number(raw);
       if (Number.isFinite(n)) onChange(litNum(n));
     };
-    return <input className="wf-input" type="number" value={value} onChange={handle} />;
+    return (
+      <input
+        className="wf-input"
+        type="number"
+        value={value}
+        min={range?.min}
+        max={range?.max}
+        step={range?.step}
+        onChange={handle}
+      />
+    );
   }
   const value = typeof bound.value === "string" ? bound.value : "";
   const handle = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>): void => onChange(litStr(e.target.value));
@@ -318,7 +373,7 @@ function TemplateEditor({
               />
             </div>
           )}
-          <button type="button" className="wf-list-remove" title="Remove" onClick={() => removeAt(i)}>
+          <button type="button" className="wf-list-remove" title="Remove" aria-label="Remove" onClick={() => removeAt(i)}>
             ✕
           </button>
         </div>
@@ -348,6 +403,7 @@ function BindingControl({
   optional,
   literal = "text",
   placeholder,
+  range,
 }: {
   bound: Binding | undefined;
   onChange: (b: Binding | undefined) => void;
@@ -355,6 +411,7 @@ function BindingControl({
   optional?: boolean;
   literal?: LiteralKind;
   placeholder?: string;
+  range?: NumRange;
 }): ReactElement {
   const active: BindingKind | "none" = bound?.kind ?? (optional ? "none" : "literal");
   const onSwitch = (k: BindingKind | "none"): void =>
@@ -366,7 +423,7 @@ function BindingControl({
     <div className="wf-bind">
       <BindingSourceTabs active={active} optional={optional} disabled={disabled} onSwitch={onSwitch} />
       {bound?.kind === "literal" && (
-        <LiteralEditor bound={bound} literal={literal} placeholder={placeholder} onChange={onChange} />
+        <LiteralEditor bound={bound} literal={literal} placeholder={placeholder} range={range} onChange={onChange} />
       )}
       {bound?.kind === "ref" && <RefEditor bound={bound} onChange={onChange} ctx={ctx} />}
       {bound?.kind === "var" && <VarEditor bound={bound} onChange={onChange} ctx={ctx} />}
@@ -413,15 +470,17 @@ function BoundNumberField({
   bound,
   onChange,
   ctx,
+  range,
 }: {
   label: string;
   bound: Binding | undefined;
   onChange: (b: Binding | undefined) => void;
   ctx: BindingContext;
+  range?: NumRange;
 }): ReactElement {
   return (
     <FieldBox label={label}>
-      <BindingControl bound={bound} onChange={onChange} ctx={ctx} optional literal="number" />
+      <BindingControl bound={bound} onChange={onChange} ctx={ctx} optional literal="number" range={range} />
     </FieldBox>
   );
 }
@@ -484,7 +543,7 @@ function ConditionEditor({
             {conds.map((c, i) => (
               <div className="wf-cond-child" key={keys.current[i]}>
                 <ConditionEditor condition={c} ctx={ctx} onChange={(next) => setChild(i, next)} />
-                <button type="button" className="wf-list-remove" title="Remove" onClick={() => removeChild(i)}>
+                <button type="button" className="wf-list-remove" title="Remove" aria-label="Remove" onClick={() => removeChild(i)}>
                   ✕
                 </button>
               </div>
@@ -526,10 +585,11 @@ function ConditionEditor({
             type="button"
             role="tab"
             aria-selected={k === condition.kind}
+            title={COND_META[k].title}
             className={`wf-bind-tab${k === condition.kind ? " is-active" : ""}`}
             onClick={() => onChange(switchCondition(k, condition))}
           >
-            {k}
+            {COND_META[k].label}
           </button>
         ))}
       </div>
@@ -560,10 +620,12 @@ function PlainNumberField({
   label,
   value,
   onChange,
+  range,
 }: {
   label: string;
   value: number | undefined;
   onChange: (v: number | undefined) => void;
+  range?: NumRange;
 }): ReactElement {
   const handle = (e: ChangeEvent<HTMLInputElement>): void => {
     const raw = e.target.value;
@@ -573,7 +635,15 @@ function PlainNumberField({
   };
   return (
     <Field label={label}>
-      <input className="wf-input" type="number" value={value === undefined ? "" : String(value)} onChange={handle} />
+      <input
+        className="wf-input"
+        type="number"
+        value={value === undefined ? "" : String(value)}
+        min={range?.min}
+        max={range?.max}
+        step={range?.step}
+        onChange={handle}
+      />
     </Field>
   );
 }
@@ -647,7 +717,7 @@ function ListRow({ children, onRemove }: { children: ReactNode; onRemove: () => 
   return (
     <div className="wf-list-row">
       <div className="wf-list-row-fields">{children}</div>
-      <button type="button" className="wf-list-remove" title="Remove" onClick={onRemove}>
+      <button type="button" className="wf-list-remove" title="Remove" aria-label="Remove" onClick={onRemove}>
         ✕
       </button>
     </div>
@@ -674,10 +744,12 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
           )}
           {t.kind === "schedule" && (
             <>
-              <PlainTextField label="Cron" value={t.cron} onChange={(cron) => setT({ ...t, cron })} />
+              <PlainTextField label="Cron" value={t.cron} placeholder="0 9 * * 1" onChange={(cron) => setT({ ...t, cron })} />
+              <Note>Five fields: minute hour day month weekday. Example: 0 9 * * 1 runs Mondays at 09:00.</Note>
               <PlainTextField
                 label="Timezone"
                 value={t.timezone ?? ""}
+                placeholder="UTC"
                 onChange={(v) => setT({ ...t, timezone: v || undefined })}
               />
             </>
@@ -704,8 +776,20 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
         <>
           <BoundTextField label="Model" bound={c.model} ctx={ctx} onChange={(model) => set({ model })} />
           <BoundTextField label="Prompt" multiline bound={c.prompt} ctx={ctx} onChange={(prompt) => set({ prompt })} />
-          <BoundNumberField label="Temperature" bound={c.temperature} ctx={ctx} onChange={(temperature) => set({ temperature })} />
-          <BoundNumberField label="Max tokens" bound={c.maxTokens} ctx={ctx} onChange={(maxTokens) => set({ maxTokens })} />
+          <BoundNumberField
+            label="Temperature"
+            bound={c.temperature}
+            ctx={ctx}
+            range={{ min: 0, max: 2, step: 0.1 }}
+            onChange={(temperature) => set({ temperature })}
+          />
+          <BoundNumberField
+            label="Max tokens"
+            bound={c.maxTokens}
+            ctx={ctx}
+            range={{ min: 1, step: 1 }}
+            onChange={(maxTokens) => set({ maxTokens })}
+          />
         </>
       );
     }
@@ -769,12 +853,28 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
 
     case "tool": {
       const c = node.config;
+      const setTool = (toolId: string): void => onChange({ ...node, config: { ...c, toolId } });
+      if (ctx.tools.length === 0) {
+        return (
+          <>
+            <PlainTextField label="Tool" value={c.toolId} placeholder="tool id" onChange={setTool} />
+            <Note>No tools are defined in this workflow yet — add one to the registry to pick it here.</Note>
+          </>
+        );
+      }
       return (
-        <PlainTextField
-          label="Tool ID"
-          value={c.toolId}
-          onChange={(toolId) => onChange({ ...node, config: { ...c, toolId } })}
-        />
+        <Field label="Tool">
+          <select className="wf-input wf-select" value={c.toolId} onChange={(e) => setTool(e.target.value)}>
+            {!ctx.tools.some((t) => t.id === c.toolId) && (
+              <option value={c.toolId}>{c.toolId || "— select a tool —"}</option>
+            )}
+            {ctx.tools.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name} — {t.id}
+              </option>
+            ))}
+          </select>
+        </Field>
       );
     }
 
@@ -803,6 +903,7 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
           <PlainNumberField
             label="Max concurrency"
             value={c.maxConcurrency}
+            range={{ min: 1, step: 1 }}
             onChange={(maxConcurrency) => set({ maxConcurrency })}
           />
           {c.mode === "map" && (
@@ -856,7 +957,13 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
             onChange={(mode) => set({ mode })}
           />
           {c.mode === "count" && (
-            <BoundNumberField label="Count" bound={c.count} ctx={ctx} onChange={(count) => set({ count })} />
+            <BoundNumberField
+              label="Count"
+              bound={c.count}
+              ctx={ctx}
+              range={{ min: 0, step: 1 }}
+              onChange={(count) => set({ count })}
+            />
           )}
           {c.mode === "forEach" && (
             <PlainTextField label="Item var" value={c.itemVar ?? ""} onChange={(v) => set({ itemVar: v || undefined })} />
@@ -864,6 +971,7 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
           <PlainNumberField
             label="Max iterations"
             value={c.maxIterations}
+            range={{ min: 1, step: 1 }}
             onChange={(maxIterations) => set({ maxIterations })}
           />
         </>
@@ -987,14 +1095,45 @@ function NodeForm({ node, onChange, ctx }: InspectorProps): ReactElement {
   }
 }
 
-export function Inspector({ node, onChange, ctx }: InspectorProps): ReactElement {
+export function Inspector({ node, onChange, ctx, issues, onDelete, onDuplicate }: InspectorShellProps): ReactElement {
   const def = NODE_TYPES[node.type];
   return (
     <div className="wf-inspector">
       <div className="wf-inspector-head">
-        <div className="wf-inspector-name">{def.name}</div>
-        <div className="wf-inspector-type">{def.technical}</div>
+        <div className="wf-inspector-titles">
+          <div className="wf-inspector-name">{def.name}</div>
+          <div className="wf-inspector-type">{def.technical}</div>
+        </div>
+        <code className="wf-inspector-id" title="Node id">
+          {node.id}
+        </code>
+        {(onDuplicate || onDelete) && (
+          <div className="wf-inspector-actions">
+            {onDuplicate && (
+              <button type="button" className="wf-code-btn" onClick={onDuplicate}>
+                Duplicate
+              </button>
+            )}
+            {onDelete && (
+              <button type="button" className="wf-code-btn wf-btn-danger" onClick={onDelete}>
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
+      {issues && issues.length > 0 && (
+        <div className="wf-inspector-issues" role="alert">
+          <span className="wf-inspector-issues-head">
+            {issues.length} issue{issues.length === 1 ? "" : "s"} on this node
+          </span>
+          <ul>
+            {issues.map((i, idx) => (
+              <li key={`${i.invariant}-${idx}`}>{i.message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="wf-inspector-body">
         <PlainTextField
           label="Name"

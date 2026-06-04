@@ -414,7 +414,8 @@ ports connect by drag, and selection + Delete removes. A single connection rule 
 mirroring the IR edge invariants: the local pairwise check (`canConnect`:
 control↔control / data↔data, out→in, no self, compatible data types, no duplicate)
 plus the graph-global acyclicity check (`wouldFormCycle`: the data subgraph stays a
-DAG, and control flow may only cycle back through a loop node's `continue` port) —
+DAG, and control flow may only cycle back through a loop node's `continue` port or a
+parallel node's `join` port) —
 drives both React Flow's `isValidConnection` (snap + drop refusal) and the live port
 highlighting (valid targets light up, the source pulses, everything else dims), so
 what lights up is exactly what can be dropped. Phase C adds the inspector: the canvas

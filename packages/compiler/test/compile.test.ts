@@ -7,6 +7,8 @@ import { compileWorkflow, CompileError } from "../src/compile.js";
 // generated files in @airun/sdk are produced from.
 import { invoiceGraph } from "../../schema/dist/examples/invoice.graph.js";
 import { landingGraph } from "../../schema/dist/examples/landing.graph.js";
+import { contentPipelineGraph } from "../../schema/dist/examples/content-pipeline.graph.js";
+import { crmAssistantGraph } from "../../schema/dist/examples/crm-assistant.graph.js";
 
 // --- tiny graph builders ----------------------------------------------------
 
@@ -67,6 +69,28 @@ describe("example graphs", () => {
     // fn-tool const names dodge the imported handler names.
     expect(out).toContain("const writeComponent = tool.fn(");
     expect(out).toContain("handler: writeComponentHandler,");
+  });
+
+  it("compiles the content pipeline with a parallel fan-out and a forEach loop", () => {
+    const out = compileWorkflow(contentPipelineGraph as WorkflowGraph, { sdkModule: "@airun/sdk" });
+    expect(out).toContain("export const contentPipeline = defineWorkflow(");
+    // parallel branches + object aggregate
+    expect(out).toContain("const composeParts = await step.parallel([");
+    expect(out).toContain('const compose = { "landing": composeParts[0], "pricing": composeParts[1], "pageList": composeParts[2] };');
+    // forEach loop binds the item var as a local param, not a state read
+    expect(out).toContain("await step.forEach(compose.pageList.pages, async (page) => {");
+    expect(out).toContain("prompt: `Write the page titled ${page}`");
+    expect(out).toContain("await pages.append(writePage);");
+  });
+
+  it("compiles the CRM assistant with classify routing and an approval gate", () => {
+    const out = compileWorkflow(crmAssistantGraph as WorkflowGraph, { sdkModule: "@airun/sdk" });
+    expect(out).toContain("export const crmAssistant = defineWorkflow(");
+    expect(out).toContain("const route = await ai.classify(");
+    expect(out).toContain('if (route === "Manage records") {');
+    expect(out).toContain("await ai.agent(");
+    expect(out).toContain("await step.approval(");
+    expect(out).toContain("if (approve.approved) {");
   });
 });
 
@@ -191,6 +215,105 @@ describe("synchronous-arrow hoisting", () => {
     expect(predicateLine).toBeDefined();
     expect(predicateLine).not.toContain("await");
     expect(predicateLine).toContain("thresholdValue > 5");
+  });
+});
+
+// --- parallel + loop emission -----------------------------------------------
+
+const llmBody = (id: string): WorkflowNode => ({
+  id,
+  type: "llm",
+  layout: { x: 1, y: 0 },
+  ports: [...inOutPorts],
+  config: { model: { kind: "literal", value: "m" }, prompt: { kind: "literal", value: "go" } },
+});
+
+const sink: WorkflowNode = {
+  id: "out",
+  type: "output",
+  layout: { x: 3, y: 0 },
+  ports: [{ id: "in", kind: "control", direction: "in", name: "in" }],
+  config: { value: { kind: "literal", value: null } },
+};
+
+describe("parallel emission", () => {
+  it("emits step.parallelMap for map mode, binding the item var as a local param", () => {
+    const out = compileWorkflow(
+      graph(
+        [
+          {
+            id: "fan",
+            type: "parallel",
+            layout: { x: 1, y: 0 },
+            ports: [{ id: "in", kind: "control", direction: "in", name: "in" }, { id: "out", kind: "control", direction: "out", name: "out" }],
+            config: {
+              mode: "map",
+              over: { kind: "var", name: "items" },
+              itemVar: "item",
+              maxConcurrency: 4,
+              aggregate: { kind: "merge" },
+            },
+          },
+          { ...llmBody("work"), layout: { x: 2, y: 0 } },
+          sink,
+        ],
+        [
+          ctl("e1", "trigger", "fan"),
+          { id: "b", kind: "control", from: { nodeId: "fan", portId: "branch" }, to: { nodeId: "work", portId: "in" } },
+          { id: "j", kind: "control", from: { nodeId: "work", portId: "out" }, to: { nodeId: "fan", portId: "join" } },
+          { id: "e2", kind: "control", from: { nodeId: "fan", portId: "out" }, to: { nodeId: "out", portId: "in" } },
+        ],
+        { variables: [{ name: "items", scope: "run", dataType: "json", initial: { kind: "literal", value: [] } }] },
+      ),
+    );
+    expect(out).toContain("await step.parallelMap((await items.get()), async (item) => {");
+    expect(out).toContain("{ maxConcurrency: 4 }");
+  });
+});
+
+describe("loop emission", () => {
+  const loopGraph = (loopConfig: WorkflowNode["config"], over: Partial<WorkflowGraph> = {}): WorkflowGraph =>
+    graph(
+      [
+        {
+          id: "loop",
+          type: "loop",
+          layout: { x: 1, y: 0 },
+          ports: [{ id: "in", kind: "control", direction: "in", name: "in" }],
+          config: loopConfig,
+        },
+        { ...llmBody("work"), layout: { x: 2, y: 0 } },
+        sink,
+      ],
+      [
+        ctl("e1", "trigger", "loop"),
+        { id: "lb", kind: "control", from: { nodeId: "loop", portId: "body" }, to: { nodeId: "work", portId: "in" } },
+        { id: "lc", kind: "control", from: { nodeId: "work", portId: "out" }, to: { nodeId: "loop", portId: "continue" } },
+        { id: "ld", kind: "control", from: { nodeId: "loop", portId: "done" }, to: { nodeId: "out", portId: "in" } },
+      ],
+      over,
+    );
+
+  it("emits a bounded for-loop for count mode", () => {
+    const out = compileWorkflow(
+      loopGraph({ mode: "count", count: { kind: "literal", value: 3 }, maxIterations: 10 }),
+    );
+    expect(out).toContain("for (let i = 0; i < 3; i++) {");
+  });
+
+  it("emits step.while for while mode with a maxIterations bound", () => {
+    const out = compileWorkflow(
+      loopGraph(
+        {
+          mode: "while",
+          condition: { kind: "compare", op: "lt", left: { kind: "var", name: "n" }, right: { kind: "literal", value: 5 } },
+          maxIterations: 20,
+        },
+        { variables: [{ name: "n", scope: "run", dataType: "number", initial: { kind: "literal", value: 0 } }] },
+      ),
+    );
+    expect(out).toContain("await step.while(");
+    expect(out).toContain("{ maxIterations: 20 }");
   });
 });
 
