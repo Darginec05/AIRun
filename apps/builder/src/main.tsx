@@ -1,7 +1,7 @@
 import { StrictMode, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { FlowBuilder, type AssistantScenario } from "@airun/flow-builder";
-import { invoiceGraph, crmAssistantGraph } from "@airun/schema/examples";
+import { invoiceGraph, crmAssistantGraph, webAppGraph } from "@airun/schema/examples";
 import type { WorkflowGraph } from "@airun/schema";
 import "reactflow/dist/style.css";
 import "./styles.css";
@@ -39,6 +39,15 @@ const scenarios: ReadonlyArray<AssistantScenario> = [
     graph: invoiceGraph as WorkflowGraph,
     reply: "Automating invoice processing — laying down extraction, validation, and approval.",
     receiptTitle: "Assembled the invoice workflow",
+  },
+  {
+    id: "webapp",
+    label: "Generate a web application",
+    keywords: ["web app", "web application", "app", "build an app", "saas", "full-stack", "website builder"],
+    graph: webAppGraph as WorkflowGraph,
+    reply:
+      "Generating a web application — refining the spec, architecting, building features in parallel, then self-healing the tests before deploy.",
+    receiptTitle: "Assembled the web app builder",
   },
 ];
 

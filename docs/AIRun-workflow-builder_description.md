@@ -408,7 +408,8 @@ materializes the dynamic ports the IR leaves implicit (`route:*`, `branch:*`,
 renders a `WorkflowGraph` on a React Flow canvas honoring the two-edge contract
 (control = solid accent with an animated dashed overlay; data = thin teal dashes with
 a hover type-label) plus a searchable, category-grouped palette; `apps/builder` is the
-standalone Vite app that mounts it on the invoice demo. Phase B adds live editing:
+standalone Vite app that mounts it on an empty draft graph and lets the AI Assistant
+assemble a workflow (see Phase F). Phase B adds live editing:
 palette items drag onto the canvas to create nodes (via the registry's `createNode`),
 ports connect by drag, and selection + Delete removes. A single connection rule set —
 mirroring the IR edge invariants: the local pairwise check (`canConnect`:
@@ -455,6 +456,24 @@ can't execute in the browser, and there's no server; the same `RunClient` interf
 real HTTP/SSE client when a runtime server lands. Step-key→node mapping is exact only for the
 mock (it keys by node id); a real run keys steps as `label#ordinal`, so node-level highlighting
 against the real runtime needs a codegen sourcemap — a follow-up.
+Phase F adds the right sidebar's two tabs — the inspector (unchanged) and an **AI
+Assistant**. The assistant is a thin presentational chat (`assistant.tsx`: message
+list, suggestion chips, typing heartbeat, composer) that emits prompts; the build
+choreography is owned by the canvas. `FlowBuilder` takes a `scenarios` prop
+(`AssistantScenario[]`: id, label, keyword list, a `WorkflowGraph`, and reply/receipt
+copy); a keyword/label match swaps the canvas's `base` graph wholesale (so the
+scenario's variables/tools/secrets/schemas flow into the live graph for codegen and
+validation, not just its nodes/edges), clears the canvas, then stages the node
+entrance one-by-one before drawing the edges and `fitView`-ing — reusing the node
+card's mount-pop so the workflow visibly assembles itself. Selecting a node
+auto-switches back to the inspector. `apps/builder` wires three scripted recipes —
+"Build a CRM assistant", "Automate invoice processing", and "Generate a web
+application". The last is `web-app.graph.ts`, the most ambitious fixture: a
+spec-to-deploy pipeline that refines a spec, gates on a clarification `humanInput`,
+architects, fans features out over a `parallel` **map**, runs a bounded `while`
+self-heal loop, then deploys a preview gated on `humanApproval` before shipping to
+production — exercising the map/loop back-edge ports (`branch`/`join`,
+`body`/`continue`/`done`) end to end.
 Still to come: the real run-server + HTTP/SSE client, and node-level highlighting for real runs.
 
 ---

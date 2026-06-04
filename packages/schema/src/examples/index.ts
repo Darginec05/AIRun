@@ -6,3 +6,4 @@ export { invoiceGraph } from "./invoice.graph.js";
 export { landingGraph } from "./landing.graph.js";
 export { contentPipelineGraph } from "./content-pipeline.graph.js";
 export { crmAssistantGraph } from "./crm-assistant.graph.js";
+export { webAppGraph } from "./web-app.graph.js";
