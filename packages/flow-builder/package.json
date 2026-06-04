@@ -31,6 +31,7 @@
     "@airun/schema": "workspace:*",
     "@shikijs/langs": "4.2.0",
     "@shikijs/themes": "4.2.0",
+    "react-resizable-panels": "^2.1.7",
     "reactflow": "^11.11.4",
     "shiki": "^4.2.0"
   },

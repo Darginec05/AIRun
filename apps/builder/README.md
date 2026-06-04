@@ -49,8 +49,13 @@ A mid-edit graph that isn't valid yet shows the failing invariants instead of
 code, and not-yet-supported node types surface the compiler's error — so the
 drawer doubles as live validation. An always-on validity badge (even when
 collapsed) and a synced/​syncing indicator give the canvas a health signal at a
-glance; when valid, Copy and Download export the active tab, and the top edge
-drags to resize.
+glance; when valid, Copy and Download export the active tab.
+
+The three zones are nested **resizable panels** (`react-resizable-panels`):
+every boundary drags to resize (sizes are percentages, so the layout survives
+window resizes), the palette collapses from the topbar toggle (shadcn-style
+offcanvas) and the code drawer collapses from its own header, while the canvas
+panel stays mounted so the React Flow viewport is preserved across collapses.
 
 The topbar **Run** button starts a live-run overlay: `@airun/client`'s mock run
 client streams a simulated trace of the current graph, lit up two ways — each

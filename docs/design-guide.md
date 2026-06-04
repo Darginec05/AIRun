@@ -123,11 +123,24 @@ Rules of thumb:
 
 ## 4. Component patterns
 
-- **Layout is one CSS grid.** The whole app shell is a single
-  `grid-template-areas` with `topbar / palette / canvas / inspector / code`.
-  The middle row is `1fr`; **every child of a flex/grid track that scrolls
-  internally gets `min-height: 0`** or it will blow out the track (this was a
-  real bug — the unbounded `1fr` pushed the code drawer off-screen).
+- **Layout is a topbar over nested resizable panels.** The shell is a 2-row
+  grid (`46px` topbar + `1fr` body); the body is a `react-resizable-panels`
+  vertical group — the canvas row over the code drawer — whose first panel is a
+  horizontal group of palette / canvas / inspector. Every boundary drags to
+  resize (sizes are **percentages**, so the layout survives window resizes), the
+  palette and code panels are **collapsible** (palette via the topbar toggle,
+  code via its own header), and the canvas panel never unmounts so React Flow
+  keeps its viewport across collapses. Two rules that were real bugs: the panel
+  group fills the `1fr` track so its inline `height: 100%` resolves against a
+  *definite* row, and **every internally-scrolling track gets `min-height: 0`**
+  or it blows out (a Panel clips by default — the inspector overrides to
+  `overflow: auto` to scroll within its panel). Collapsing the code panel drops
+  it to `0%`, but a `min-height: 34px` keeps its header bar visible as the
+  always-present "open me" affordance.
+- **Resize handles are hairlines with a generous hit area.** A `1px` line that
+  goes accent on `data-resize-handle-state="hover"|"drag"`; the library widens
+  the pointer target beyond the visual via `hitAreaMargins` (same "big hit area,
+  precise visual" philosophy as ports).
 - **Spacing via flex/grid `gap`,** never margins between siblings or bare inline
   flow. Survives reordering and keeps rhythm consistent.
 - **Inputs:** `--panel-2` fill, `--border` hairline, on focus →
@@ -174,8 +187,8 @@ canvas       pan / zoom / drag / connect / minimap / controls
 palette      searchable grouped draggable node list
 inspector    per-node config forms
 assistant    the AI chat panel
-codedrawer   syntax-highlit code/IR tabs; validity badge + synced state, copy/download, drag-to-resize
-app          state + wiring; owns the graph, selection, viewport
+codedrawer   syntax-highlit code/IR tabs; validity badge + synced state, copy/download (collapse/resize is the shell's panel group)
+app          state + wiring; owns the graph, selection, viewport, nested resizable panels
 ```
 
 ### The two assets everything hangs off

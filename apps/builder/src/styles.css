@@ -88,83 +88,87 @@ body {
   height: 100%;
 }
 
-.demo-bar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 40px;
-  padding: 0 16px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-
-.demo-bar-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-3);
-}
-
-.demo-tabs {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.demo-tab {
-  font-family: var(--font);
-  font-size: 12px;
-  color: var(--text-3);
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 4px 11px;
-  cursor: pointer;
-  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
-}
-
-.demo-tab:hover {
-  color: var(--text-2);
-  border-color: var(--border-strong);
-}
-
-.demo-tab.is-active {
-  color: var(--accent-bright);
-  background: var(--accent-soft);
-  border-color: var(--accent-dim);
-}
-
 .demo-canvas {
   flex: 1;
   min-height: 0;
 }
 
-/* --- App shell: one grid (DESIGN.md §4) -------------------------------- */
+/* --- App shell: topbar over a nested resizable-panel body (DESIGN.md §4) - */
 
 .wf-shell {
   display: grid;
+  grid-template-rows: 46px 1fr;
   height: 100%;
-  grid-template-columns: 248px 1fr 308px;
-  grid-template-rows: 46px 1fr 34px;
-  grid-template-areas:
-    "topbar topbar topbar"
-    "palette canvas inspector"
-    "code code code";
   background: var(--bg);
 }
 
-.wf-shell.is-code-open {
-  grid-template-rows: 46px 1fr minmax(220px, 42%);
+/* The panel group fills the 1fr track; its inline height:100% resolves against
+   the definite grid row, so the nested panels size correctly. */
+.wf-body {
+  min-height: 0;
+  min-width: 0;
 }
 
 .wf-topbar {
-  grid-area: topbar;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+}
+
+.wf-sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: -4px;
+  color: var(--text-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.wf-sidebar-toggle:hover {
+  color: var(--text);
+  background: var(--panel-3);
+}
+
+.wf-sidebar-toggle.is-active {
+  color: var(--text);
+}
+
+.wf-sidebar-toggle:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Resize handles: a hairline that lights up on hover/drag. The library widens the
+   pointer hit area beyond the 1px line via hitAreaMargins, so the target is
+   generous while the visual stays precise (DESIGN.md ports philosophy). */
+.wf-rsz {
+  flex: 0 0 auto;
+  background: var(--border);
+  transition: background 140ms ease;
+}
+
+.wf-rsz-col {
+  width: 1px;
+  cursor: col-resize;
+}
+
+.wf-rsz-row {
+  height: 1px;
+  cursor: row-resize;
+}
+
+.wf-rsz[data-resize-handle-state="hover"],
+.wf-rsz[data-resize-handle-state="drag"] {
+  background: var(--accent);
 }
 
 .wf-brand {
@@ -188,39 +192,44 @@ body {
   color: var(--text-4);
 }
 
-/* --- Zones ------------------------------------------------------------- */
+/* --- Zones (each fills its react-resizable Panel) ---------------------- */
 
 .wf-palette-zone {
-  grid-area: palette;
-  min-height: 0;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  overflow: hidden;
+}
+
+.wf-canvas-panel {
+  min-width: 0;
 }
 
 .wf-canvas-zone {
-  grid-area: canvas;
-  min-height: 0;
-  min-width: 0;
+  height: 100%;
+  width: 100%;
   position: relative;
 }
 
+/* The Panel clips by default; let the inspector body scroll within it instead. */
 .wf-inspector-zone {
-  grid-area: inspector;
-  min-height: 0;
   background: var(--panel);
   border-left: 1px solid var(--border);
-  padding: 14px;
-  overflow: auto;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Collapsing the code panel drops it to 0%, but min-height keeps the 34px header
+   bar visible as the always-present "open me" affordance. */
+.wf-code-panel {
+  min-height: 34px;
 }
 
 .wf-code-zone {
-  grid-area: code;
-  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border-top: 1px solid var(--border);
 }
 
 .wf-code-head {
@@ -254,13 +263,17 @@ body {
 }
 
 .wf-code-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-4);
   background: none;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 3px 8px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  padding: 4px 9px;
   cursor: pointer;
 }
 
@@ -272,6 +285,40 @@ body {
   color: var(--text);
   background: var(--panel-2);
   border-color: var(--border);
+  border-bottom-color: transparent;
+}
+
+/* Active tab gets a 2px accent bar across its top edge — the "current file" cue. */
+.wf-code-tab.is-active::before {
+  content: "";
+  position: absolute;
+  inset: -1px -1px auto -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+
+/* A tiny IDE-style file-type chip before each filename. */
+.wf-code-badge {
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+}
+
+.wf-code-badge.is-ts {
+  background: #2d79c7;
+}
+
+.wf-code-badge.is-json {
+  background: var(--cat-logic);
+  color: #1a1a22;
 }
 
 .wf-code-validity {
@@ -295,8 +342,41 @@ body {
 }
 
 .wf-code-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
-  color: var(--text-4);
+  color: var(--text-3);
+}
+
+.wf-code-sync-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--run-done);
+}
+
+/* While a graph edit is settling, the dot swaps to accent and pulses a ring —
+   the cause→effect heartbeat that earns the "live code" claim. */
+.wf-code-sync.is-syncing {
+  color: var(--accent-bright);
+}
+
+.wf-code-sync.is-syncing .wf-code-sync-dot {
+  background: var(--accent);
+  animation: wf-sync-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes wf-sync-pulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 .wf-code-actions {
@@ -326,19 +406,6 @@ body {
   cursor: not-allowed;
 }
 
-/* Top-edge drag affordance; sits above the header so it can grow the grid track. */
-.wf-code-resizer {
-  height: 6px;
-  flex: 0 0 auto;
-  cursor: row-resize;
-  background: transparent;
-  border-top: 1px solid var(--border);
-}
-
-.wf-code-resizer:hover {
-  background: var(--accent-soft);
-}
-
 /* Visually hidden, but announced by screen readers (copy success/failure). */
 .wf-sr-live {
   position: absolute;
@@ -352,19 +419,55 @@ body {
   white-space: nowrap;
 }
 
+/* Editor typography (custom props) is shared by the gutter and both code
+   renderers, so line numbers line up exactly with their lines. */
 .wf-code-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
   border-top: 1px solid var(--border);
+  background: var(--bg);
+  --code-font-size: 12.5px;
+  --code-line: 1.65;
+  --code-pad-y: 12px;
+}
+
+/* The code row: gutter + code as flex siblings. min-content lets long lines push
+   it wider (horizontal scroll) while the gutter stays pinned. */
+.wf-code-pre-wrap {
+  display: flex;
+  align-items: stretch;
+  min-width: min-content;
+  min-height: 100%;
+}
+
+/* Line numbers: a column pinned to the left through horizontal scroll, on the
+   lighter panel surface with a hairline divider. */
+.wf-code-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: var(--code-pad-y) 10px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: var(--code-font-size);
+  line-height: var(--code-line);
+  color: var(--text-4);
+  background: var(--panel);
+  border-right: 1px solid var(--border-soft);
+  user-select: none;
 }
 
 .wf-code-pre {
+  flex: 1;
   margin: 0;
-  padding: 12px 14px;
+  padding: var(--code-pad-y) 14px;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--code-font-size);
+  line-height: var(--code-line);
   color: var(--text-2);
   white-space: pre;
 }
@@ -374,13 +477,17 @@ body {
 }
 
 /* Shiki emits a self-styled <pre class="shiki"> (inline theme colors); we only
-   set the surface + typography and let its bg blend into the panel. */
+   set the surface + typography and let its bg blend into the editor pane. */
+.wf-shiki {
+  flex: 1;
+}
+
 .wf-shiki .shiki {
   margin: 0;
-  padding: 12px 14px;
+  padding: var(--code-pad-y) 14px;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--code-font-size);
+  line-height: var(--code-line);
   background: transparent !important;
 }
 
@@ -1363,10 +1470,316 @@ body {
   }
   .wf-node,
   .wf-node.is-run-running,
-  .wf-run-step.is-running .wf-run-dot {
+  .wf-run-step.is-running .wf-run-dot,
+  .wf-code-sync.is-syncing .wf-code-sync-dot,
+  .wf-assist-typing span {
     animation: none;
   }
   * {
     transition: none !important;
   }
+}
+
+/* --- right sidebar: Inspector / AI Assistant tabs ----------------------- */
+
+.wf-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.wf-sidebar-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-sidebar-tab {
+  position: relative;
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 8px 10px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-4);
+  cursor: pointer;
+}
+
+.wf-sidebar-tab:hover {
+  color: var(--text-2);
+}
+
+.wf-sidebar-tab.is-active {
+  color: var(--text);
+}
+
+/* 2px accent underline marks the live tab. */
+.wf-sidebar-tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.wf-sidebar-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Inspector keeps the old scroll + padding; the Assistant owns its own layout. */
+.wf-sidebar-body.is-inspector {
+  overflow: auto;
+  padding: 14px;
+}
+
+.wf-sidebar-body.is-assistant {
+  display: flex;
+  overflow: hidden;
+}
+
+/* --- AI Assistant ------------------------------------------------------- */
+
+.wf-assistant {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wf-assist-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+}
+
+.wf-assist-intro-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.wf-assist-intro-sub {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.wf-assist-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.wf-assist-chip {
+  text-align: left;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.wf-assist-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--elevated);
+}
+
+.wf-assist-msgs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wf-assist-msg {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+
+.wf-assist-msg.is-user {
+  flex-direction: row-reverse;
+}
+
+.wf-assist-avatar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border-radius: 50%;
+}
+
+.wf-assist-avatar.is-assistant {
+  background: linear-gradient(135deg, var(--accent), var(--data));
+  color: #fff;
+}
+
+.wf-assist-avatar.is-user {
+  background: var(--elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text-3);
+}
+
+.wf-assist-bubble {
+  max-width: 84%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wf-assist-msg.is-assistant .wf-assist-bubble {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-top-left-radius: 4px;
+}
+
+.wf-assist-msg.is-user .wf-assist-bubble {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  border-top-right-radius: 4px;
+}
+
+/* typing heartbeat: three dots bouncing in sequence (~950ms loop). */
+.wf-assist-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-assist-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-4);
+  animation: wf-assist-bounce 0.95s infinite ease-in-out;
+}
+
+.wf-assist-typing span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.wf-assist-typing span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes wf-assist-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* build receipt: a checklist of what the assistant assembled. */
+.wf-assist-receipt-title {
+  margin-bottom: 6px;
+  font-weight: 650;
+}
+
+.wf-assist-receipt ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wf-assist-receipt li {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.wf-assist-check {
+  color: var(--data);
+  font-weight: 700;
+}
+
+/* composer */
+.wf-assist-composer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.wf-assist-input {
+  flex: 1 1 auto;
+  resize: none;
+  max-height: 120px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.wf-assist-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.wf-assist-send {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+
+.wf-assist-send:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.wf-assist-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.wf-assist-hint {
+  flex: 0 0 auto;
+  padding: 0 10px 8px;
+  font-size: 10.5px;
+  color: var(--text-4);
 }

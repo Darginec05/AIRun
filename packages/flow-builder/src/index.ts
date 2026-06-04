@@ -10,7 +10,7 @@
 // and the builder stylesheet that defines the design tokens + `wf-*` classes.
 
 export { FlowBuilder } from "./flow-builder.js";
-export type { FlowBuilderProps } from "./flow-builder.js";
+export type { FlowBuilderProps, AssistantScenario } from "./flow-builder.js";
 
 export { graphToFlow, dataTypeLabel } from "./graph-adapter.js";
 export type { FlowModel } from "./graph-adapter.js";

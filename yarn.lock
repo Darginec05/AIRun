@@ -106,6 +106,7 @@ __metadata:
     "@types/react-dom": ^18.3.0
     react: ^18.3.1
     react-dom: ^18.3.1
+    react-resizable-panels: ^2.1.7
     reactflow: ^11.11.4
     shiki: ^4.2.0
     typescript: ^5.5.4
@@ -2221,6 +2222,16 @@ __metadata:
   version: 0.17.0
   resolution: "react-refresh@npm:0.17.0"
   checksum: e9d23a70543edde879263976d7909cd30c6f698fa372a1240142cf7c8bf99e0396378b9c07c2d39c3a10261d7ba07dc49f990cd8f1ac7b88952e99040a0be5e9
+  languageName: node
+  linkType: hard
+
+"react-resizable-panels@npm:^2.1.7":
+  version: 2.1.9
+  resolution: "react-resizable-panels@npm:2.1.9"
+  peerDependencies:
+    react: ^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+    react-dom: ^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0 || ^19.0.0-rc
+  checksum: a807d6cd572c1323e21cea896cb27ae1544219dd813c746607ecb05d4f3a81a166921f86720481ac07b7e37e7812e0a24abbb7a3237b8e11cf69d29f7022a2cb
   languageName: node
   linkType: hard
 
