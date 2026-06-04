@@ -4,6 +4,22 @@
 // React Flow canvas (customized for the two-edge control/data contract and
 // valid-target highlighting), inspector forms, and the live workflow.ts /
 // workflow.graph.json / @airun/sdk drawer. Emits a WorkflowGraph; never owns
-// runtime. Implementation not started yet.
+// runtime.
+//
+// Consumers must include React Flow's base stylesheet (`reactflow/dist/style.css`)
+// and the builder stylesheet that defines the design tokens + `wf-*` classes.
 
-export {};
+export { FlowBuilder } from "./FlowBuilder.js";
+export type { FlowBuilderProps } from "./FlowBuilder.js";
+
+export { graphToFlow, dataTypeLabel } from "./graph-adapter.js";
+export type { FlowModel } from "./graph-adapter.js";
+
+export { WorkflowNodeCard } from "./nodes.js";
+export type { WorkflowNodeData } from "./nodes.js";
+
+export { ControlEdge, DataEdge } from "./edges.js";
+export type { DataEdgeData } from "./edges.js";
+
+export { Palette } from "./palette.js";
+export { Icon } from "./icons.js";

@@ -28,6 +28,7 @@
     "@airun/client": "workspace:*",
     "@airun/compiler": "workspace:*",
     "@airun/node-registry": "workspace:*",
+    "@airun/schema": "workspace:*",
     "reactflow": "^11.11.4"
   },
   "peerDependencies": {

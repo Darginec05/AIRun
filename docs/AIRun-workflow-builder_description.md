@@ -398,8 +398,28 @@ append-only trace event stream into the journal (`run.started/resumed/suspended/
 completed/failed` and per-step `started/completed/failed` with timings, status and
 payloads). `createRuntime({ onTrace })` streams events live as they happen (for the
 canvas pulse), and `runtime.trace(runId)` folds the stored stream into a `RunTrace`
-timeline for the dashboard. Both surfaces read this one source of truth; only the
-UIs remain to be built (the canvas is still gated on React Flow).
+timeline for the dashboard. Both surfaces read this one source of truth.
+
+**Canvas status.** Phase A of the visual builder now exists. `@airun/node-registry`
+carries the canonical node-type metadata (category + hue, friendly name + technical
+subtitle, icon, static port geometry, default config) and a `derivePorts(node)` that
+materializes the dynamic ports the IR leaves implicit (`route:*`, `branch:*`,
+`branch:else`, `approved`/`rejected`, `error`, `fields.*`). `@airun/flow-builder`
+renders a `WorkflowGraph` on a React Flow canvas honoring the two-edge contract
+(control = solid accent with an animated dashed overlay; data = thin teal dashes with
+a hover type-label) plus a searchable, category-grouped palette; `apps/builder` is the
+standalone Vite app that mounts it on the invoice demo. Phase B adds live editing:
+palette items drag onto the canvas to create nodes (via the registry's `createNode`),
+ports connect by drag, and selection + Delete removes. A single connection rule set —
+mirroring the IR edge invariants: the local pairwise check (`canConnect`:
+control↔control / data↔data, out→in, no self, compatible data types, no duplicate)
+plus the graph-global acyclicity check (`wouldFormCycle`: the data subgraph stays a
+DAG, and control flow may only cycle back through a loop node's `continue` port) —
+drives both React Flow's `isValidConnection` (snap + drop refusal) and the live port
+highlighting (valid targets light up, the source pulses, everything else dims), so
+what lights up is exactly what can be dropped.
+Still to come: inspector forms (C), the live code drawer wired to `@airun/compiler`
+(D), and the live-run overlay (E).
 
 ---
 
